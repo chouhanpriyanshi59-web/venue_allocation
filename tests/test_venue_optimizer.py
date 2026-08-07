@@ -150,4 +150,52 @@ def test_proportional_and_balanced_venue_allocation():
 
     session.close()
 
+def test_group_isolation_in_venues():
+    session = SessionLocal()
+
+    # Create 2 Departments
+    d1 = Department(name="CSE", code="CSE")
+    d2 = Department(name="ECE", code="ECE")
+    session.add_all([d1, d2])
+    session.flush()
+
+    # Create 500 Students: 250 in Group A, 250 in Group B
+    for i in range(250):
+        s1 = Student(usn=f"1DS21GA{i:03d}", full_name=f"Group A Stu {i}", gender="Male" if i % 2 == 0 else "Female", department_id=d1.id if i % 2 == 0 else d2.id, group_name="Group A", status="Active")
+        s2 = Student(usn=f"1DS21GB{i:03d}", full_name=f"Group B Stu {i}", gender="Male" if i % 2 == 0 else "Female", department_id=d1.id if i % 2 == 0 else d2.id, group_name="Group B", status="Active")
+        session.add_all([s1, s2])
+
+    # Create 2 Venues (ECE Hall: 500 cap, Civil Hall: 200 cap) and 2 Time Slots
+    v1 = Venue(name="ECE Seminar Hall", capacity=500, is_active=True)
+    v2 = Venue(name="Civil Hall", capacity=200, is_active=True)
+    ts1 = TimeSlot(slot_name="Morning Session", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    ts2 = TimeSlot(slot_name="Afternoon Session", start_time="02:00 PM", end_time="04:00 PM", day_number=1)
+    session.add_all([v1, v2, ts1, ts2])
+    session.commit()
+
+    # Run Venue Optimization
+    res = VenueOptimizer.optimize_allocations(auto_backup=False)
+    assert res.newly_allocated_venues == 500
+
+    # Verify Group Isolation: NO venue in ANY slot should contain both Group A and Group B
+    allocated_pairs = session.query(
+        Student.time_slot_id, Student.venue_id, Student.group_name
+    ).filter(
+        Student.is_deleted == False,
+        Student.venue_id.isnot(None)
+    ).distinct().all()
+
+    slot_venue_map = {}
+    for ts_id, v_id, g_name in allocated_pairs:
+        key = (ts_id, v_id)
+        if key not in slot_venue_map:
+            slot_venue_map[key] = set()
+        slot_venue_map[key].add(g_name)
+
+    for (ts_id, v_id), g_set in slot_venue_map.items():
+        assert len(g_set) == 1, f"Venue ID {v_id} in TimeSlot {ts_id} contained multiple groups: {g_set}"
+
+    session.close()
+
+
 
