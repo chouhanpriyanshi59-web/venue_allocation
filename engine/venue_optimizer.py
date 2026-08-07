@@ -183,29 +183,24 @@ class VenueOptimizer:
         if not active_groups:
             return {}
 
-        # If only 1 group needs allocation, all venues go to that group
         if len(active_groups) == 1:
             return {active_groups[0]: list(venues)}
 
-        # Sort groups deterministically (by student count descending, then group name ascending)
         sorted_groups = sorted(active_groups, key=lambda g: (-group_counts[g], g))
 
         total_students = sum(group_counts[g] for g in sorted_groups)
         total_venue_capacity = sum(v.capacity for v in venues)
 
-        # Target capacity per group proportional to its demand
         group_target_caps = {}
         for g in sorted_groups:
             exact = (total_venue_capacity * group_counts[g]) / max(1, total_students)
             group_target_caps[g] = int(round(exact))
 
-        # Sort venues by capacity descending, then ID ascending for deterministic assignment
         sorted_venues = sorted(venues, key=lambda v: (-v.capacity, v.id))
 
         assigned: Dict[str, List[Venue]] = {g: [] for g in sorted_groups}
         assigned_caps: Dict[str, int] = {g: 0 for g in sorted_groups}
 
-        # Assign discrete venues to groups greedily by capacity deficiency
         for v in sorted_venues:
             best_group = None
             max_deficiency = -float('inf')
@@ -226,22 +221,125 @@ class VenueOptimizer:
         return assigned
 
     @classmethod
+    def _distribute_department_evenly(
+        cls,
+        venues: List[Venue],
+        total_students: int
+    ) -> Dict[int, int]:
+        """
+        Distributes department students across assigned venues as evenly as possible.
+        For example:
+        450 students across 3 halls (capacity 200 each) -> {v1: 150, v2: 150, v3: 150}
+        500 students across 3 halls (capacity 200 each) -> {v1: 167, v2: 167, v3: 166}
+        """
+        if not venues or total_students <= 0:
+            return {v.id: 0 for v in venues}
+
+        total_capacity = sum(v.capacity for v in venues)
+        num_venues = len(venues)
+
+        equal_target = total_students // num_venues
+        remainder = total_students % num_venues
+
+        sorted_venues = sorted(venues, key=lambda v: (-v.capacity, v.id))
+
+        can_equal_split = all(v.capacity >= equal_target + (1 if idx < remainder else 0) for idx, v in enumerate(sorted_venues))
+
+        if can_equal_split:
+            targets = {}
+            for idx, v in enumerate(sorted_venues):
+                targets[v.id] = equal_target + (1 if idx < remainder else 0)
+            return targets
+        else:
+            ratio = min(1.0, total_students / max(1, total_capacity))
+            base_alloc: Dict[int, int] = {}
+            remainders: List[Tuple[float, int, int]] = []
+
+            for v in sorted_venues:
+                exact = v.capacity * ratio
+                base = min(int(exact), v.capacity)
+                base_alloc[v.id] = base
+                rem = exact - base
+                remainders.append((rem, v.capacity, v.id))
+
+            assigned = sum(base_alloc.values())
+            deficit = total_students - assigned
+            remainders.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+            idx = 0
+            while deficit > 0 and remainders:
+                rem, max_cap, v_id = remainders[idx % len(remainders)]
+                if base_alloc[v_id] < max_cap:
+                    base_alloc[v_id] += 1
+                    deficit -= 1
+                idx += 1
+                if idx > len(remainders) * 100:
+                    break
+            return base_alloc
+
+    @classmethod
+    def _partition_venues_by_department(
+        cls,
+        venues: List[Venue],
+        dept_counts: Dict[int, int]
+    ) -> Dict[int, List[Venue]]:
+        """
+        Partitions active venues among departments for a single time slot,
+        guaranteeing that every venue is assigned to at most ONE department in this slot.
+        """
+        if not dept_counts or not venues:
+            return {}
+
+        active_depts = [d for d, cnt in dept_counts.items() if cnt > 0]
+        if not active_depts:
+            return {}
+
+        if len(active_depts) == 1:
+            return {active_depts[0]: list(venues)}
+
+        sorted_depts = sorted(active_depts, key=lambda d: (-dept_counts[d], d))
+        sorted_venues = sorted(venues, key=lambda v: (-v.capacity, v.id))
+
+        assigned: Dict[int, List[Venue]] = {d: [] for d in sorted_depts}
+        assigned_caps: Dict[int, int] = {d: 0 for d in sorted_depts}
+
+        for v in sorted_venues:
+            best_dept = None
+            max_deficiency = -float('inf')
+
+            for d in sorted_depts:
+                needed = dept_counts[d]
+                deficiency = needed - assigned_caps[d]
+                if deficiency > max_deficiency:
+                    max_deficiency = deficiency
+                    best_dept = d
+
+            if best_dept is None:
+                best_dept = sorted_depts[0]
+
+            assigned[best_dept].append(v)
+            assigned_caps[best_dept] += v.capacity
+
+        return assigned
+
+    @classmethod
     def optimize_allocations(
         cls,
         target_group: Optional[str] = None,
+        mode: str = "group_wise",
         allow_department_splits: bool = True,
         auto_backup: bool = True
     ) -> AllocationResult:
         """
-        Executes Group-Isolated Proportional Stratified Occupancy Balancing optimization.
-        Guarantees that every venue in any time slot contains students from ONLY ONE group.
+        Executes Venue Optimization in selected mode:
+        1. "group_wise": Enforces Group Isolation (Group A / Group B), proportional department & gender ratios.
+        2. "branch_wise": Enforces Branch Isolation (Department-wise: CSE only, ECE only). Evenly splits large departments across venues.
         """
         if auto_backup:
             BackupManager.create_backup(trigger_action="PRE_VENUE_ALLOCATION")
 
         session: Session = SessionLocal()
         try:
-            # 1. Check Capacity
             cap_report = cls.check_capacity(session, target_group)
             if not cap_report.is_sufficient:
                 raise CapacityExceededError(
@@ -250,7 +348,6 @@ class VenueOptimizer:
                     available_capacity=cap_report.total_capacity
                 )
 
-            # 2. Query target unallocated active students
             query = session.query(Student).filter(
                 Student.is_deleted == False,
                 Student.status == "Active",
@@ -277,112 +374,196 @@ class VenueOptimizer:
             if not time_slots:
                 raise ValueError("No time slots found. Please configure time slots first.")
 
-            # Sort venues and time slots deterministically by ID
             venues.sort(key=lambda v: v.id)
             time_slots.sort(key=lambda t: t.id)
-
-            # Organize unallocated students by group
-            groups_unallocated: Dict[str, List[Student]] = {}
-            for s in unallocated_students:
-                g_key = s.group_name or "Unassigned"
-                if g_key not in groups_unallocated:
-                    groups_unallocated[g_key] = []
-                groups_unallocated[g_key].append(s)
-
-            # Sort students within each group deterministically by USN / ID
-            for g_key in groups_unallocated:
-                groups_unallocated[g_key].sort(key=lambda s: (s.usn or "", s.full_name or "", s.id))
 
             total_unallocated = len(unallocated_students)
             allocated_count = 0
             now = datetime.utcnow()
 
-            # Process Slot by Slot with Group-Dedicated Venues
-            for t_slot in time_slots:
-                # Filter active groups with remaining students
-                active_group_counts = {g: len(stus) for g, stus in groups_unallocated.items() if len(stus) > 0}
-                if not active_group_counts:
-                    break
+            is_branch_wise = mode in ("branch_wise", "branch", "department_wise")
 
-                # Partition venues among active groups for this slot
-                partitioned_venues = cls._partition_venues_by_group(venues, active_group_counts)
+            if is_branch_wise:
+                # --- BRANCH-WISE ALLOCATION (BY DEPARTMENT) ---
+                depts_unallocated: Dict[int, List[Student]] = {}
+                for s in unallocated_students:
+                    d_id = s.department_id or 0
+                    if d_id not in depts_unallocated:
+                        depts_unallocated[d_id] = []
+                    depts_unallocated[d_id].append(s)
 
-                # Process each group independently within its dedicated venues
-                for g_name, g_venues in partitioned_venues.items():
-                    if not g_venues:
-                        continue
+                for d_id in depts_unallocated:
+                    depts_unallocated[d_id].sort(key=lambda s: (s.usn or "", s.full_name or "", s.id))
 
-                    g_students = groups_unallocated.get(g_name, [])
-                    if not g_students:
-                        continue
+                for t_slot in time_slots:
+                    active_dept_counts = {d: len(stus) for d, stus in depts_unallocated.items() if len(stus) > 0}
+                    if not active_dept_counts:
+                        break
 
-                    g_slot_capacity = sum(v.capacity for v in g_venues)
-                    count_to_take = min(len(g_students), g_slot_capacity)
+                    partitioned_venues = cls._partition_venues_by_department(venues, active_dept_counts)
 
-                    # Slice students for this slot
-                    slot_g_students = g_students[:count_to_take]
-                    groups_unallocated[g_name] = g_students[count_to_take:]
+                    for dept_id, d_venues in partitioned_venues.items():
+                        if not d_venues:
+                            continue
 
-                    # Step A: Proportional Balanced Venue Capacities for this Group's Venues
-                    venue_targets = cls._distribute_venue_capacities(g_venues, count_to_take)
+                        d_students = depts_unallocated.get(dept_id, [])
+                        if not d_students:
+                            continue
 
-                    # Step B: Stratify group students by (department_id, gender)
-                    strata_students: Dict[Tuple[int, str], List[Student]] = {}
-                    for s in slot_g_students:
-                        s_key = (s.department_id or 0, s.gender or "Unknown")
-                        if s_key not in strata_students:
-                            strata_students[s_key] = []
-                        strata_students[s_key].append(s)
+                        d_slot_capacity = sum(v.capacity for v in d_venues)
+                        count_to_take = min(len(d_students), d_slot_capacity)
 
-                    # Step C: Generate Proportional Stratum Matrix
-                    matrix_alloc = cls._allocate_strata_matrix(venue_targets, strata_students)
+                        slot_d_students = d_students[:count_to_take]
+                        depts_unallocated[dept_id] = d_students[count_to_take:]
 
-                    # Step D: Deterministically assign students to dedicated venues
-                    strata_indices: Dict[Tuple[int, str], int] = {k: 0 for k in strata_students}
+                        # Calculate even split targets per venue
+                        venue_targets = cls._distribute_department_evenly(d_venues, count_to_take)
 
-                    for v in g_venues:
-                        v_id = v.id
-                        for s_key, s_list in strata_students.items():
-                            assign_count = matrix_alloc.get((v_id, s_key), 0)
-                            if assign_count > 0:
-                                curr_start = strata_indices[s_key]
-                                sub_group = s_list[curr_start : curr_start + assign_count]
-                                strata_indices[s_key] += assign_count
+                        # Stratify by gender within department
+                        gender_students: Dict[str, List[Student]] = {}
+                        for s in slot_d_students:
+                            g_key = s.gender or "Unknown"
+                            if g_key not in gender_students:
+                                gender_students[g_key] = []
+                            gender_students[g_key].append(s)
 
-                                for s in sub_group:
-                                    s.venue_id = v_id
-                                    s.time_slot_id = t_slot.id
-                                    s.venue_allocated_at = now
-                                    allocated_count += 1
+                        # Assign to venues according to venue_targets
+                        matrix_alloc = cls._allocate_strata_matrix(
+                            venue_targets,
+                            {(dept_id, g): stus for g, stus in gender_students.items()}
+                        )
 
-            # Verification Assertion: Ensure no venue in any time slot contains multiple groups
-            allocated_pairs = session.query(
-                Student.time_slot_id, Student.venue_id, Student.group_name
-            ).filter(
-                Student.is_deleted == False,
-                Student.venue_id.isnot(None),
-                Student.time_slot_id.isnot(None)
-            ).distinct().all()
+                        strata_indices: Dict[Tuple[int, str], int] = { (dept_id, g): 0 for g in gender_students }
 
-            slot_venue_map: Dict[Tuple[int, int], set] = {}
-            for ts_id, v_id, g_name in allocated_pairs:
-                key = (ts_id, v_id)
-                if key not in slot_venue_map:
-                    slot_venue_map[key] = set()
-                slot_venue_map[key].add(g_name or "Unassigned")
+                        for v in d_venues:
+                            v_id = v.id
+                            for g in gender_students:
+                                s_key = (dept_id, g)
+                                assign_count = matrix_alloc.get((v_id, s_key), 0)
+                                if assign_count > 0:
+                                    s_list = gender_students[g]
+                                    curr_start = strata_indices[s_key]
+                                    sub_group = s_list[curr_start : curr_start + assign_count]
+                                    strata_indices[s_key] += assign_count
 
-            for (ts_id, v_id), g_set in slot_venue_map.items():
-                if len(g_set) > 1:
-                    session.rollback()
-                    raise RuntimeError(
-                        f"Group isolation violation detected! Venue ID {v_id} in Time Slot ID {ts_id} contains multiple groups: {g_set}"
-                    )
+                                    for s in sub_group:
+                                        s.venue_id = v_id
+                                        s.time_slot_id = t_slot.id
+                                        s.venue_allocated_at = now
+                                        allocated_count += 1
+
+                # Branch Isolation Verification Assertion
+                allocated_pairs = session.query(
+                    Student.time_slot_id, Student.venue_id, Student.department_id
+                ).filter(
+                    Student.is_deleted == False,
+                    Student.venue_id.isnot(None),
+                    Student.time_slot_id.isnot(None)
+                ).distinct().all()
+
+                slot_venue_map: Dict[Tuple[int, int], set] = {}
+                for ts_id, v_id, d_id in allocated_pairs:
+                    key = (ts_id, v_id)
+                    if key not in slot_venue_map:
+                        slot_venue_map[key] = set()
+                    slot_venue_map[key].add(d_id or 0)
+
+                for (ts_id, v_id), d_set in slot_venue_map.items():
+                    if len(d_set) > 1:
+                        session.rollback()
+                        raise RuntimeError(
+                            f"Branch isolation violation detected! Venue ID {v_id} in Time Slot ID {ts_id} contains multiple departments: {d_set}"
+                        )
+
+            else:
+                # --- GROUP-WISE ALLOCATION (DEFAULT) ---
+                groups_unallocated: Dict[str, List[Student]] = {}
+                for s in unallocated_students:
+                    g_key = s.group_name or "Unassigned"
+                    if g_key not in groups_unallocated:
+                        groups_unallocated[g_key] = []
+                    groups_unallocated[g_key].append(s)
+
+                for g_key in groups_unallocated:
+                    groups_unallocated[g_key].sort(key=lambda s: (s.usn or "", s.full_name or "", s.id))
+
+                for t_slot in time_slots:
+                    active_group_counts = {g: len(stus) for g, stus in groups_unallocated.items() if len(stus) > 0}
+                    if not active_group_counts:
+                        break
+
+                    partitioned_venues = cls._partition_venues_by_group(venues, active_group_counts)
+
+                    for g_name, g_venues in partitioned_venues.items():
+                        if not g_venues:
+                            continue
+
+                        g_students = groups_unallocated.get(g_name, [])
+                        if not g_students:
+                            continue
+
+                        g_slot_capacity = sum(v.capacity for v in g_venues)
+                        count_to_take = min(len(g_students), g_slot_capacity)
+
+                        slot_g_students = g_students[:count_to_take]
+                        groups_unallocated[g_name] = g_students[count_to_take:]
+
+                        venue_targets = cls._distribute_venue_capacities(g_venues, count_to_take)
+
+                        strata_students: Dict[Tuple[int, str], List[Student]] = {}
+                        for s in slot_g_students:
+                            s_key = (s.department_id or 0, s.gender or "Unknown")
+                            if s_key not in strata_students:
+                                strata_students[s_key] = []
+                            strata_students[s_key].append(s)
+
+                        matrix_alloc = cls._allocate_strata_matrix(venue_targets, strata_students)
+                        strata_indices: Dict[Tuple[int, str], int] = {k: 0 for k in strata_students}
+
+                        for v in g_venues:
+                            v_id = v.id
+                            for s_key, s_list in strata_students.items():
+                                assign_count = matrix_alloc.get((v_id, s_key), 0)
+                                if assign_count > 0:
+                                    curr_start = strata_indices[s_key]
+                                    sub_group = s_list[curr_start : curr_start + assign_count]
+                                    strata_indices[s_key] += assign_count
+
+                                    for s in sub_group:
+                                        s.venue_id = v_id
+                                        s.time_slot_id = t_slot.id
+                                        s.venue_allocated_at = now
+                                        allocated_count += 1
+
+                # Group Isolation Verification Assertion
+                allocated_pairs = session.query(
+                    Student.time_slot_id, Student.venue_id, Student.group_name
+                ).filter(
+                    Student.is_deleted == False,
+                    Student.venue_id.isnot(None),
+                    Student.time_slot_id.isnot(None)
+                ).distinct().all()
+
+                slot_venue_map: Dict[Tuple[int, int], set] = {}
+                for ts_id, v_id, g_name in allocated_pairs:
+                    key = (ts_id, v_id)
+                    if key not in slot_venue_map:
+                        slot_venue_map[key] = set()
+                    slot_venue_map[key].add(g_name or "Unassigned")
+
+                for (ts_id, v_id), g_set in slot_venue_map.items():
+                    if len(g_set) > 1:
+                        session.rollback()
+                        raise RuntimeError(
+                            f"Group isolation violation detected! Venue ID {v_id} in Time Slot ID {ts_id} contains multiple groups: {g_set}"
+                        )
 
             # Log audit
+            audit_mode = "BRANCH_WISE" if is_branch_wise else "GROUP_WISE"
             audit = AuditLog(
                 action="VENUE_OPTIMIZATION_SUCCESS",
                 entity_type="VenueAllocation",
-                details=f"Proportionally allocated {allocated_count} students to group-isolated venues across {len(time_slots)} slots."
+                details=f"Successfully allocated {allocated_count} students using {audit_mode} mode across {len(time_slots)} slots."
             )
             session.add(audit)
             session.commit()

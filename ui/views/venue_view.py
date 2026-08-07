@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QMessageBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QInputDialog, QLineEdit
+    QHeaderView, QInputDialog, QLineEdit, QComboBox
 )
 from PySide6.QtCore import Qt, Signal
 from database.connection import SessionLocal
@@ -93,15 +93,37 @@ class VenueAllocationView(QWidget):
         lists_layout.addWidget(slot_box)
         layout.addLayout(lists_layout)
 
-        # Execute Optimization Footer
-        footer_layout = QHBoxLayout()
-        btn_run_milp = QPushButton("Run MILP Venue & Timeslot Optimization")
+        # Execute Optimization Footer Card
+        footer_card = QFrame()
+        footer_card.setProperty("class", "card-widget")
+        footer_layout = QHBoxLayout(footer_card)
+
+        lbl_mode = QLabel("Allocation Mode:")
+        lbl_mode.setStyleSheet("font-size: 13px; font-weight: bold; color: #F8FAFC;")
+
+        self.combo_mode = QComboBox()
+        self.combo_mode.addItems([
+            "Group-wise Allocation (Group A / Group B)",
+            "Branch-wise Allocation (Department-wise)"
+        ])
+        self.combo_mode.setMinimumWidth(280)
+        self.combo_mode.setStyleSheet(
+            "QComboBox { background-color: #1E293B; color: #F8FAFC; border: 1px solid #334155; "
+            "border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: bold; }"
+            "QComboBox::drop-down { border: 0px; }"
+            "QComboBox QAbstractItemView { background-color: #1E293B; color: #F8FAFC; selection-background-color: #3B82F6; }"
+        )
+
+        btn_run_milp = QPushButton("Allocate Venues")
         btn_run_milp.setProperty("class", "primary-btn")
+        btn_run_milp.setStyleSheet("padding: 8px 20px; font-weight: bold; font-size: 13px;")
         btn_run_milp.clicked.connect(self.run_optimization)
 
+        footer_layout.addWidget(lbl_mode)
+        footer_layout.addWidget(self.combo_mode)
         footer_layout.addStretch()
         footer_layout.addWidget(btn_run_milp)
-        layout.addLayout(footer_layout)
+        layout.addWidget(footer_card)
 
         self.refresh_tables()
 
@@ -235,14 +257,18 @@ class VenueAllocationView(QWidget):
             finally:
                 session.close()
 
-
     def run_optimization(self):
         try:
-            res = VenueOptimizer.optimize_allocations()
+            selected_idx = self.combo_mode.currentIndex()
+            mode = "branch_wise" if selected_idx == 1 else "group_wise"
+
+            res = VenueOptimizer.optimize_allocations(mode=mode)
+            mode_name = "Branch-wise" if mode == "branch_wise" else "Group-wise"
             QMessageBox.information(
                 self,
                 "Venue Optimization Complete",
-                f"Successfully assigned {res.newly_allocated_venues} students to venues and time slots!"
+                f"Successfully completed {mode_name} Venue Allocation!\n\n"
+                f"Assigned {res.newly_allocated_venues} students to venues and time slots."
             )
             self.refresh_tables()
             self.venue_allocation_done.emit()
@@ -254,3 +280,4 @@ class VenueAllocationView(QWidget):
             )
         except Exception as e:
             QMessageBox.critical(self, "Optimization Error", str(e))
+

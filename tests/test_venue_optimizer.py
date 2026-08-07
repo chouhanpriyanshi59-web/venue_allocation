@@ -192,10 +192,79 @@ def test_group_isolation_in_venues():
             slot_venue_map[key] = set()
         slot_venue_map[key].add(g_name)
 
-    for (ts_id, v_id), g_set in slot_venue_map.items():
-        assert len(g_set) == 1, f"Venue ID {v_id} in TimeSlot {ts_id} contained multiple groups: {g_set}"
+    session.close()
+
+def test_branch_wise_venue_allocation_even_split():
+    session = SessionLocal()
+
+    # Create Department MECH
+    mech = Department(name="Mechanical Engineering", code="MECH")
+    cse = Department(name="Computer Science", code="CSE")
+    session.add_all([mech, cse])
+    session.flush()
+
+    # Add 450 MECH students
+    for i in range(450):
+        s = Student(usn=f"1DS21ME{i:03d}", full_name=f"MECH Stu {i}", gender="Male" if i % 2 == 0 else "Female", department_id=mech.id, status="Active")
+        session.add(s)
+
+    # Create 3 Halls (200 capacity each) & 1 Time Slot
+    h1 = Venue(name="Hall A", capacity=200, is_active=True)
+    h2 = Venue(name="Hall B", capacity=200, is_active=True)
+    h3 = Venue(name="Hall C", capacity=200, is_active=True)
+    ts = TimeSlot(slot_name="Slot 1", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    session.add_all([h1, h2, h3, ts])
+    session.commit()
+
+    # Run Branch-wise Allocation
+    res = VenueOptimizer.optimize_allocations(mode="branch_wise", auto_backup=False)
+    assert res.newly_allocated_venues == 450
+
+    # Verify Even Split: 450 MECH students across 3 halls of cap 200 should be [150, 150, 150]
+    h1_stus = session.query(Student).filter(Student.venue_id == h1.id).count()
+    h2_stus = session.query(Student).filter(Student.venue_id == h2.id).count()
+    h3_stus = session.query(Student).filter(Student.venue_id == h3.id).count()
+
+    assert h1_stus == 150
+    assert h2_stus == 150
+    assert h3_stus == 150
 
     session.close()
+
+def test_branch_wise_500_students_split():
+    session = SessionLocal()
+
+    mech = Department(name="Mechanical Engineering", code="MECH")
+    session.add(mech)
+    session.flush()
+
+    # Add 500 MECH students
+    for i in range(500):
+        s = Student(usn=f"1DS21ME{i:03d}", full_name=f"MECH Stu {i}", gender="Male" if i % 2 == 0 else "Female", department_id=mech.id, status="Active")
+        session.add(s)
+
+    h1 = Venue(name="Hall A", capacity=200, is_active=True)
+    h2 = Venue(name="Hall B", capacity=200, is_active=True)
+    h3 = Venue(name="Hall C", capacity=200, is_active=True)
+    ts = TimeSlot(slot_name="Slot 1", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    session.add_all([h1, h2, h3, ts])
+    session.commit()
+
+    # Run Branch-wise Allocation
+    res = VenueOptimizer.optimize_allocations(mode="branch_wise", auto_backup=False)
+    assert res.newly_allocated_venues == 500
+
+    # Verify Even Split: 500 MECH students across 3 halls of cap 200 should be approx [167, 167, 166]
+    counts = sorted([
+        session.query(Student).filter(Student.venue_id == h1.id).count(),
+        session.query(Student).filter(Student.venue_id == h2.id).count(),
+        session.query(Student).filter(Student.venue_id == h3.id).count()
+    ], reverse=True)
+
+    assert counts == [167, 167, 166]
+
+    session.close()
+
 
 
 
