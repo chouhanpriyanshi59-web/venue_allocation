@@ -33,28 +33,113 @@ class ExportService:
         return value
 
     @classmethod
-    def export_excel_master(cls, destination_path: Path) -> Path:
-        """Generates a styled Excel workbook with multiple tabs: Master, Group A, Group B, Department, Venue."""
+    def export_group_wise_excel(cls, destination_path: Path) -> Path:
+        """Generates Group-wise Allocation Excel file."""
         session: Session = SessionLocal()
         try:
             wb = openpyxl.Workbook()
-            # Remove default sheet
+            ws = wb.active
+            ws.title = "Group-wise Allocation"
+
+            students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
+
+            header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+            header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+
+            columns = ["USN", "Student ID", "Full Name", "Department", "Gender", "Group", "Group Venue", "Group Time Slot"]
+            ws.append(columns)
+
+            for col_num in range(1, len(columns) + 1):
+                cell = ws.cell(row=1, column=col_num)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            for s in students:
+                ws.append([
+                    cls.sanitize_cell(s.usn),
+                    cls.sanitize_cell(s.student_id or ""),
+                    cls.sanitize_cell(s.full_name),
+                    cls.sanitize_cell(s.department.name if s.department else ""),
+                    cls.sanitize_cell(s.gender),
+                    cls.sanitize_cell(s.group_name or "Unassigned"),
+                    cls.sanitize_cell(s.group_venue.name if s.group_venue else "Unassigned"),
+                    cls.sanitize_cell(s.group_time_slot.slot_name if s.group_time_slot else "Unassigned")
+                ])
+
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                col_letter = get_column_letter(col[0].column)
+                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+            wb.save(destination_path)
+            return destination_path
+        except Exception as e:
+            raise ExportError(f"Group-wise Excel export failed: {str(e)}")
+        finally:
+            session.close()
+
+    @classmethod
+    def export_branch_wise_excel(cls, destination_path: Path) -> Path:
+        """Generates Branch-wise Allocation Excel file."""
+        session: Session = SessionLocal()
+        try:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Branch-wise Allocation"
+
+            students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
+
+            header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+            header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+
+            columns = ["USN", "Student ID", "Full Name", "Department", "Gender", "Branch Venue", "Branch Time Slot"]
+            ws.append(columns)
+
+            for col_num in range(1, len(columns) + 1):
+                cell = ws.cell(row=1, column=col_num)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            for s in students:
+                ws.append([
+                    cls.sanitize_cell(s.usn),
+                    cls.sanitize_cell(s.student_id or ""),
+                    cls.sanitize_cell(s.full_name),
+                    cls.sanitize_cell(s.department.name if s.department else ""),
+                    cls.sanitize_cell(s.gender),
+                    cls.sanitize_cell(s.branch_venue.name if s.branch_venue else "Unassigned"),
+                    cls.sanitize_cell(s.branch_time_slot.slot_name if s.branch_time_slot else "Unassigned")
+                ])
+
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                col_letter = get_column_letter(col[0].column)
+                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+            wb.save(destination_path)
+            return destination_path
+        except Exception as e:
+            raise ExportError(f"Branch-wise Excel export failed: {str(e)}")
+        finally:
+            session.close()
+
+    @classmethod
+    def export_excel_master(cls, destination_path: Path) -> Path:
+        """Generates a styled Master Excel workbook displaying both Group-wise and Branch-wise allocations."""
+        session: Session = SessionLocal()
+        try:
+            wb = openpyxl.Workbook()
             wb.remove(wb.active)
 
             students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
 
             header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
             header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-            thin_border = Border(
-                left=Side(style='thin', color='D1D5DB'),
-                right=Side(style='thin', color='D1D5DB'),
-                top=Side(style='thin', color='D1D5DB'),
-                bottom=Side(style='thin', color='D1D5DB')
-            )
 
-            columns = ["USN", "Student ID", "Full Name", "Gender", "Department", "Program", "Group", "Venue", "Time Slot", "Status"]
+            columns = ["USN", "Student ID", "Full Name", "Gender", "Department", "Program", "Group", "Group Venue", "Group Time Slot", "Branch Venue", "Branch Time Slot", "Status"]
 
-            # Sheet 1: Master Allocation
             ws_master = wb.create_sheet(title="Master Allocation")
             ws_master.append(columns)
 
@@ -73,13 +158,14 @@ class ExportService:
                     cls.sanitize_cell(s.department.name if s.department else ""),
                     cls.sanitize_cell(s.program.name if s.program else ""),
                     cls.sanitize_cell(s.group_name or "Unassigned"),
-                    cls.sanitize_cell(s.venue.name if s.venue else "Unassigned"),
-                    cls.sanitize_cell(s.time_slot.slot_name if s.time_slot else "Unassigned"),
+                    cls.sanitize_cell(s.group_venue.name if s.group_venue else (s.venue.name if s.venue else "Unassigned")),
+                    cls.sanitize_cell(s.group_time_slot.slot_name if s.group_time_slot else (s.time_slot.slot_name if s.time_slot else "Unassigned")),
+                    cls.sanitize_cell(s.branch_venue.name if s.branch_venue else "Unassigned"),
+                    cls.sanitize_cell(s.branch_time_slot.slot_name if s.branch_time_slot else "Unassigned"),
                     cls.sanitize_cell(s.status)
                 ]
                 ws_master.append(row)
 
-            # Auto-fit columns
             for sheet in wb.worksheets:
                 for col in sheet.columns:
                     max_len = max(len(str(cell.value or '')) for cell in col)

@@ -1,14 +1,13 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QMessageBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QInputDialog, QLineEdit, QComboBox
+    QHeaderView, QInputDialog, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal
 from database.connection import SessionLocal
 from database.models import Venue, TimeSlot
 from database.repository import Repository
 from engine.venue_optimizer import VenueOptimizer
-from core.exceptions import CapacityExceededError
 
 class VenueAllocationView(QWidget):
     venue_allocation_done = Signal()
@@ -21,6 +20,11 @@ class VenueAllocationView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
+
+        # Header Title
+        lbl_header = QLabel("Group-wise Venue Allocation")
+        lbl_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #F8FAFC;")
+        layout.addWidget(lbl_header)
 
         # Diagnostics & Capacity Check Banner Card
         self.diag_card = QFrame()
@@ -98,29 +102,15 @@ class VenueAllocationView(QWidget):
         footer_card.setProperty("class", "card-widget")
         footer_layout = QHBoxLayout(footer_card)
 
-        lbl_mode = QLabel("Allocation Mode:")
-        lbl_mode.setStyleSheet("font-size: 13px; font-weight: bold; color: #F8FAFC;")
+        lbl_desc = QLabel("Group-wise mode maintains Group A and Group B dedicated venues.")
+        lbl_desc.setStyleSheet("color: #94A3B8; font-size: 12px;")
 
-        self.combo_mode = QComboBox()
-        self.combo_mode.addItems([
-            "Group-wise Allocation (Group A / Group B)",
-            "Branch-wise Allocation (Department-wise)"
-        ])
-        self.combo_mode.setMinimumWidth(280)
-        self.combo_mode.setStyleSheet(
-            "QComboBox { background-color: #1E293B; color: #F8FAFC; border: 1px solid #334155; "
-            "border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: bold; }"
-            "QComboBox::drop-down { border: 0px; }"
-            "QComboBox QAbstractItemView { background-color: #1E293B; color: #F8FAFC; selection-background-color: #3B82F6; }"
-        )
-
-        btn_run_milp = QPushButton("Allocate Venues")
+        btn_run_milp = QPushButton("Allocate Group-wise Venues")
         btn_run_milp.setProperty("class", "primary-btn")
         btn_run_milp.setStyleSheet("padding: 8px 20px; font-weight: bold; font-size: 13px;")
         btn_run_milp.clicked.connect(self.run_optimization)
 
-        footer_layout.addWidget(lbl_mode)
-        footer_layout.addWidget(self.combo_mode)
+        footer_layout.addWidget(lbl_desc)
         footer_layout.addStretch()
         footer_layout.addWidget(btn_run_milp)
         layout.addWidget(footer_card)
@@ -163,12 +153,12 @@ class VenueAllocationView(QWidget):
                 self.slot_table.setCellWidget(row, 3, btn_del_s)
 
             # Capacity Report
-            cap_report = VenueOptimizer.check_capacity(session)
+            cap_report = VenueOptimizer.check_capacity(session, mode="group_wise")
             if cap_report.is_sufficient:
-                self.lbl_cap_status.setText("Capacity Check Passed ✓")
+                self.lbl_cap_status.setText("Group Capacity Check Passed ✓")
                 self.lbl_cap_status.setStyleSheet("font-size: 15px; font-weight: bold; color: #10B981;")
                 self.lbl_cap_details.setText(
-                    f"Total unassigned students: {cap_report.total_students:,} | Total venue capacity available across slots: {cap_report.total_capacity:,}."
+                    f"Total unassigned group students: {cap_report.total_students:,} | Total venue capacity available: {cap_report.total_capacity:,}."
                 )
             else:
                 self.lbl_cap_status.setText("WARNING: Insufficient Venue Capacity! ⚠️")
@@ -259,25 +249,24 @@ class VenueAllocationView(QWidget):
 
     def run_optimization(self):
         try:
-            selected_idx = self.combo_mode.currentIndex()
-            mode = "branch_wise" if selected_idx == 1 else "group_wise"
-
-            res = VenueOptimizer.optimize_allocations(mode=mode)
-            mode_name = "Branch-wise" if mode == "branch_wise" else "Group-wise"
-            QMessageBox.information(
-                self,
-                "Venue Optimization Complete",
-                f"Successfully completed {mode_name} Venue Allocation!\n\n"
-                f"Assigned {res.newly_allocated_venues} students to venues and time slots."
-            )
+            res = VenueOptimizer.optimize_allocations(mode="group_wise")
+            if res.warnings and any("insufficient venue capacity" in w for w in res.warnings):
+                warning_text = "\n\n---\n\n".join(res.warnings)
+                QMessageBox.warning(
+                    self,
+                    "Insufficient Venue Capacity",
+                    warning_text
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Group-wise Venue Allocation Complete",
+                    f"Successfully completed Group-wise Venue Allocation!\n\n"
+                    f"Assigned {res.newly_allocated_venues} students to group venues and time slots."
+                )
             self.refresh_tables()
             self.venue_allocation_done.emit()
-        except CapacityExceededError as ce:
-            QMessageBox.warning(
-                self,
-                "Capacity Exceeded Error",
-                f"{str(ce)}\n\nPlease add more venues or time slots before running venue allocation."
-            )
         except Exception as e:
             QMessageBox.critical(self, "Optimization Error", str(e))
+
 

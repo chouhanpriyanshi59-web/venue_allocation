@@ -22,6 +22,7 @@ from ui.views.import_view import ImportView
 from ui.views.student_view import StudentView
 from ui.views.group_view import GroupAllocationView
 from ui.views.venue_view import VenueAllocationView
+from ui.views.branch_venue_view import BranchVenueAllocationView
 from ui.views.backup_view import BackupRollbackView
 from ui.views.export_view import ExportView
 from ui.views.logs_view import LogsSettingsView
@@ -69,7 +70,8 @@ class MainWindow(QMainWindow):
             ("import", "📥 Import Excel", ImportView),
             ("students", "👥 Student Database", StudentView),
             ("group", "🔀 Group Allocation", GroupAllocationView),
-            ("venue", "🏛️ Venue Allocation", VenueAllocationView),
+            ("venue_group", "🏛️ Group Venue Alloc", VenueAllocationView),
+            ("venue_branch", "🏢 Branch Venue Alloc", BranchVenueAllocationView),
             ("backup", "🛡️ Backup & Rollback", BackupRollbackView),
             ("export", "📤 Export Center", ExportView),
             ("logs", "📜 Audit Logs", LogsSettingsView),
@@ -100,6 +102,8 @@ class MainWindow(QMainWindow):
                 view_inst.allocation_done.connect(self.on_data_changed)
             if hasattr(view_inst, 'venue_allocation_done'):
                 view_inst.venue_allocation_done.connect(self.on_data_changed)
+            if hasattr(view_inst, 'branch_allocation_done'):
+                view_inst.branch_allocation_done.connect(self.on_data_changed)
             if hasattr(view_inst, 'db_restored'):
                 view_inst.db_restored.connect(self.on_data_changed)
 

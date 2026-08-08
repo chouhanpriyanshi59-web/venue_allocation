@@ -34,7 +34,7 @@ class Venue(Base):
     location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    students: Mapped[List["Student"]] = relationship("Student", back_populates="venue")
+    students: Mapped[List["Student"]] = relationship("Student", foreign_keys="Student.venue_id", back_populates="venue")
 
 class TimeSlot(Base):
     __tablename__ = "time_slots"
@@ -45,7 +45,7 @@ class TimeSlot(Base):
     end_time: Mapped[str] = mapped_column(String(20), nullable=False)    # e.g., "11:00 AM"
     day_number: Mapped[int] = mapped_column(Integer, default=1)
 
-    students: Mapped[List["Student"]] = relationship("Student", back_populates="time_slot")
+    students: Mapped[List["Student"]] = relationship("Student", foreign_keys="Student.time_slot_id", back_populates="time_slot")
 
     __table_args__ = (
         UniqueConstraint('slot_name', 'day_number', name='uq_slot_day'),
@@ -70,6 +70,16 @@ class Student(Base):
     venue_id: Mapped[Optional[int]] = mapped_column(ForeignKey("venues.id"), nullable=True, index=True)
     time_slot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("time_slots.id"), nullable=True, index=True)
 
+    # Independent Group-wise Venue Allocation
+    group_venue_id: Mapped[Optional[int]] = mapped_column(ForeignKey("venues.id"), nullable=True, index=True)
+    group_time_slot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("time_slots.id"), nullable=True, index=True)
+    group_venue_allocated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Independent Branch-wise Venue Allocation
+    branch_venue_id: Mapped[Optional[int]] = mapped_column(ForeignKey("venues.id"), nullable=True, index=True)
+    branch_time_slot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("time_slots.id"), nullable=True, index=True)
+    branch_venue_allocated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     group_allocated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     venue_allocated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -79,8 +89,14 @@ class Student(Base):
 
     department: Mapped[Optional["Department"]] = relationship("Department", back_populates="students")
     program: Mapped[Optional["Program"]] = relationship("Program", back_populates="students")
-    venue: Mapped[Optional["Venue"]] = relationship("Venue", back_populates="students")
-    time_slot: Mapped[Optional["TimeSlot"]] = relationship("TimeSlot", back_populates="students")
+    venue: Mapped[Optional["Venue"]] = relationship("Venue", foreign_keys=[venue_id], back_populates="students")
+    time_slot: Mapped[Optional["TimeSlot"]] = relationship("TimeSlot", foreign_keys=[time_slot_id], back_populates="students")
+    
+    group_venue: Mapped[Optional["Venue"]] = relationship("Venue", foreign_keys=[group_venue_id])
+    group_time_slot: Mapped[Optional["TimeSlot"]] = relationship("TimeSlot", foreign_keys=[group_time_slot_id])
+    branch_venue: Mapped[Optional["Venue"]] = relationship("Venue", foreign_keys=[branch_venue_id])
+    branch_time_slot: Mapped[Optional["TimeSlot"]] = relationship("TimeSlot", foreign_keys=[branch_time_slot_id])
+    
     import_history: Mapped[Optional["ImportHistory"]] = relationship("ImportHistory", back_populates="students")
 
 class ImportHistory(Base):

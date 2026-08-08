@@ -2,7 +2,6 @@ import pytest
 from database.connection import init_db, SessionLocal
 from database.models import Student, Department, Venue, TimeSlot
 from engine.venue_optimizer import VenueOptimizer
-from core.exceptions import CapacityExceededError
 
 @pytest.fixture(autouse=True)
 def setup_db():
@@ -37,8 +36,8 @@ def test_venue_capacity_check_and_optimization():
     assert report.is_sufficient is False
     assert report.deficiency == 5
 
-    with pytest.raises(CapacityExceededError):
-        VenueOptimizer.optimize_allocations(auto_backup=False)
+    res_fail = VenueOptimizer.optimize_allocations(auto_backup=False)
+    assert any("insufficient venue capacity" in w for w in res_fail.warnings)
 
     # Increase capacity to 30 by adding another Time Slot
     ts2 = TimeSlot(slot_name="Slot 2", start_time="11:30 AM", end_time="01:30 PM", day_number=1)
@@ -47,7 +46,8 @@ def test_venue_capacity_check_and_optimization():
 
     # Now total capacity = 2 venues * 2 slots * 10 cap = 40 >= 25 -> Should succeed!
     res = VenueOptimizer.optimize_allocations(auto_backup=False)
-    assert res.newly_allocated_venues == 25
+    assert res.newly_allocated_venues == 5
+    assert session.query(Student).filter(Student.group_venue_id.isnot(None)).count() == 25
     session.close()
 
 def test_venue_and_timeslot_deletion():
@@ -221,9 +221,9 @@ def test_branch_wise_venue_allocation_even_split():
     assert res.newly_allocated_venues == 450
 
     # Verify Even Split: 450 MECH students across 3 halls of cap 200 should be [150, 150, 150]
-    h1_stus = session.query(Student).filter(Student.venue_id == h1.id).count()
-    h2_stus = session.query(Student).filter(Student.venue_id == h2.id).count()
-    h3_stus = session.query(Student).filter(Student.venue_id == h3.id).count()
+    h1_stus = session.query(Student).filter(Student.branch_venue_id == h1.id).count()
+    h2_stus = session.query(Student).filter(Student.branch_venue_id == h2.id).count()
+    h3_stus = session.query(Student).filter(Student.branch_venue_id == h3.id).count()
 
     assert h1_stus == 150
     assert h2_stus == 150
@@ -256,14 +256,192 @@ def test_branch_wise_500_students_split():
 
     # Verify Even Split: 500 MECH students across 3 halls of cap 200 should be approx [167, 167, 166]
     counts = sorted([
-        session.query(Student).filter(Student.venue_id == h1.id).count(),
-        session.query(Student).filter(Student.venue_id == h2.id).count(),
-        session.query(Student).filter(Student.venue_id == h3.id).count()
+        session.query(Student).filter(Student.branch_venue_id == h1.id).count(),
+        session.query(Student).filter(Student.branch_venue_id == h2.id).count(),
+        session.query(Student).filter(Student.branch_venue_id == h3.id).count()
     ], reverse=True)
 
     assert counts == [167, 167, 166]
 
     session.close()
+
+def test_coexisting_group_and_branch_wise_allocations():
+    session = SessionLocal()
+
+    mech = Department(name="Mechanical Engineering", code="MECH")
+    cse = Department(name="Computer Science", code="CSE")
+    session.add_all([mech, cse])
+    session.flush()
+
+    # Add 100 students in Group A & B
+    for i in range(100):
+        s = Student(
+            usn=f"1DS21CO{i:03d}",
+            full_name=f"Coexist Stu {i}",
+            department_id=mech.id if i % 2 == 0 else cse.id,
+            group_name="Group A" if i < 50 else "Group B",
+            status="Active"
+        )
+        session.add(s)
+
+    v1 = Venue(name="Hall 1", capacity=60, is_active=True)
+    v2 = Venue(name="Hall 2", capacity=60, is_active=True)
+    ts = TimeSlot(slot_name="Slot 1", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    session.add_all([v1, v2, ts])
+    session.commit()
+
+    # Step 1: Run Group-wise Allocation
+    res1 = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
+    assert res1.newly_allocated_venues == 100
+
+    stus_after_group = session.query(Student).all()
+    for s in stus_after_group:
+        assert s.group_venue_id is not None
+        assert s.group_time_slot_id is not None
+        assert s.branch_venue_id is None
+
+    # Step 2: Run Branch-wise Allocation
+    res2 = VenueOptimizer.optimize_allocations(mode="branch_wise", auto_backup=False)
+    assert res2.newly_allocated_venues == 100
+
+    session.expire_all()
+    stus_after_both = session.query(Student).all()
+    for s in stus_after_both:
+        # Both allocations exist simultaneously!
+        assert s.group_venue_id is not None
+        assert s.group_time_slot_id is not None
+        assert s.branch_venue_id is not None
+        assert s.branch_time_slot_id is not None
+
+    session.close()
+
+def test_user_700_student_5_branch_single_venue_priority():
+    session = SessionLocal()
+
+    depts = [
+        Department(name="Computer Science", code="CSE"),
+        Department(name="Electronics", code="ECE"),
+        Department(name="Mechanical", code="MECH"),
+        Department(name="Civil", code="CIVIL"),
+        Department(name="Electrical", code="EEE")
+    ]
+    session.add_all(depts)
+    session.flush()
+
+    # Create 140 students for each of the 5 departments (700 total)
+    for d in depts:
+        for i in range(140):
+            s = Student(
+                usn=f"1DS21{d.code}{i:03d}",
+                full_name=f"{d.code} Student {i}",
+                gender="Male" if i % 2 == 0 else "Female",
+                department_id=d.id,
+                status="Active"
+            )
+            session.add(s)
+
+    v_a = Venue(name="Venue A", capacity=200, is_active=True)
+    v_b = Venue(name="Venue B", capacity=200, is_active=True)
+    v_c = Venue(name="Venue C", capacity=200, is_active=True)
+    v_d = Venue(name="Venue D", capacity=100, is_active=True)
+    v_e = Venue(name="Venue E", capacity=200, is_active=True)
+    v_f = Venue(name="Venue F", capacity=200, is_active=True)
+
+    ts = TimeSlot(slot_name="Slot 1", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    session.add_all([v_a, v_b, v_c, v_d, v_e, v_f, ts])
+    session.commit()
+
+    # Run Branch-wise Allocation
+    res = VenueOptimizer.optimize_allocations(mode="branch_wise", auto_backup=False)
+    assert res.newly_allocated_venues == 700
+
+    session.expire_all()
+
+    # Verify that every department is in EXACTLY 1 venue
+    for d in depts:
+        assigned_venues = session.query(Student.branch_venue_id).filter(
+            Student.department_id == d.id
+        ).distinct().all()
+        assert len(assigned_venues) == 1, f"Department {d.code} was split across multiple venues!"
+
+    # Verify Venue D (capacity 100) is left empty (0 students)
+    v_d_count = session.query(Student).filter(Student.branch_venue_id == v_d.id).count()
+    assert v_d_count == 0, f"Venue D should be empty, but contains {v_d_count} students!"
+
+    session.close()
+
+def test_insufficient_capacity_handling():
+    session = SessionLocal()
+
+    dept = Department(name="Mechanical Engineering", code="MECH")
+    session.add(dept)
+    session.flush()
+
+    # Create 150 students in Group B
+    for i in range(150):
+        s = Student(
+            usn=f"1DS21ME{i:03d}",
+            full_name=f"Mech Stu {i}",
+            gender="Male" if i % 2 == 0 else "Female",
+            department_id=dept.id,
+            group_name="Group B",
+            status="Active"
+        )
+        session.add(s)
+
+    # Total capacity = 100 (1 venue, 1 slot)
+    v_c = Venue(name="Hall C", capacity=100, is_active=True)
+    ts = TimeSlot(slot_name="Slot 1", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    session.add_all([v_c, ts])
+    session.commit()
+
+    # Run Group-wise Allocation
+    res = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
+    assert res.newly_allocated_venues == 100
+    assert len(res.warnings) == 1
+    assert "Group B has insufficient venue capacity" in res.warnings[0]
+    assert "Required Capacity: 150" in res.warnings[0]
+    assert "Available Capacity: 100" in res.warnings[0]
+    assert "Unallocated Students: 50" in res.warnings[0]
+
+    session.expire_all()
+
+    # 100 should be allocated, 50 unallocated
+    allocated = session.query(Student).filter(Student.group_venue_id.isnot(None)).all()
+    unallocated = session.query(Student).filter(Student.group_venue_id.is_(None)).all()
+    assert len(allocated) == 100
+    assert len(unallocated) == 50
+
+    # Store IDs of allocated students to verify recovery leaves them unchanged
+    allocated_ids = {s.id for s in allocated}
+
+    # Recovery: Add new venue of 100 capacity
+    v_new = Venue(name="Hall New", capacity=100, is_active=True)
+    session.add(v_new)
+    session.commit()
+
+    # Run Group-wise Allocation again
+    res2 = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
+    assert res2.newly_allocated_venues == 50
+    assert len(res2.warnings) == 0
+
+    session.expire_all()
+
+    # All 150 should now be allocated
+    all_allocated = session.query(Student).filter(Student.group_venue_id.isnot(None)).all()
+    assert len(all_allocated) == 150
+
+    # Verify that original 100 students' allocations are unchanged
+    for s in all_allocated:
+        if s.id in allocated_ids:
+            assert s.group_venue_id == v_c.id
+        else:
+            assert s.group_venue_id == v_new.id
+
+    session.close()
+
+
+
 
 
 

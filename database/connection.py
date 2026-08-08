@@ -42,11 +42,24 @@ def init_db():
     from database.models import Student, Department, Program, Venue, TimeSlot, ImportHistory, BackupHistory, AuditLog, AppSettings
     Base.metadata.create_all(bind=engine)
 
-    # Auto-migration: ensure import_history_id exists on students table
+    # Auto-migration: ensure independent group/branch columns exist on students table
     with engine.connect() as conn:
         cursor = conn.exec_driver_sql("PRAGMA table_info(students)")
         columns = [row[1] for row in cursor.fetchall()]
         if "import_history_id" not in columns:
             conn.exec_driver_sql("ALTER TABLE students ADD COLUMN import_history_id INTEGER REFERENCES import_history(id)")
-            conn.commit()
+        if "group_venue_id" not in columns:
+            conn.exec_driver_sql("ALTER TABLE students ADD COLUMN group_venue_id INTEGER REFERENCES venues(id)")
+        if "group_time_slot_id" not in columns:
+            conn.exec_driver_sql("ALTER TABLE students ADD COLUMN group_time_slot_id INTEGER REFERENCES time_slots(id)")
+        if "group_venue_allocated_at" not in columns:
+            conn.exec_driver_sql("ALTER TABLE students ADD COLUMN group_venue_allocated_at DATETIME")
+        if "branch_venue_id" not in columns:
+            conn.exec_driver_sql("ALTER TABLE students ADD COLUMN branch_venue_id INTEGER REFERENCES venues(id)")
+        if "branch_time_slot_id" not in columns:
+            conn.exec_driver_sql("ALTER TABLE students ADD COLUMN branch_time_slot_id INTEGER REFERENCES time_slots(id)")
+        if "branch_venue_allocated_at" not in columns:
+            conn.exec_driver_sql("ALTER TABLE students ADD COLUMN branch_venue_allocated_at DATETIME")
+        
+        conn.commit()
 

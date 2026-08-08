@@ -25,79 +25,107 @@ class ExportView(QWidget):
         # Export Options Grid
         grid_layout = QHBoxLayout()
 
-        # Excel Export Card
-        excel_card = QFrame()
-        excel_card.setProperty("class", "card-widget")
-        ec_layout = QVBoxLayout(excel_card)
+        # Group-wise Excel Export Card
+        group_card = QFrame()
+        group_card.setProperty("class", "card-widget")
+        gc_layout = QVBoxLayout(group_card)
 
-        lbl_e_title = QLabel("Multi-Tab Excel Workbook")
-        lbl_e_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #38BDF8;")
-        lbl_e_desc = QLabel("Generates styled multi-sheet workbook (Master, Group A, Group B, Dept & Venue allocations).")
-        lbl_e_desc.setWordWrap(True)
-        lbl_e_desc.setStyleSheet("color: #94A3B8;")
+        lbl_g_title = QLabel("Group-wise Allocation Export")
+        lbl_g_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #38BDF8;")
+        lbl_g_desc = QLabel("Generates Excel file with Group-wise Venue & Time Slot assignments.")
+        lbl_g_desc.setWordWrap(True)
+        lbl_g_desc.setStyleSheet("color: #94A3B8;")
 
-        btn_exp_excel = QPushButton("Export Master Excel (.xlsx)")
-        btn_exp_excel.setProperty("class", "primary-btn")
-        btn_exp_excel.clicked.connect(self.export_excel)
+        btn_exp_group = QPushButton("Export Group-wise Excel")
+        btn_exp_group.setProperty("class", "primary-btn")
+        btn_exp_group.clicked.connect(self.export_group_excel)
 
-        ec_layout.addWidget(lbl_e_title)
-        ec_layout.addWidget(lbl_e_desc)
-        ec_layout.addStretch()
-        ec_layout.addWidget(btn_exp_excel)
-        grid_layout.addWidget(excel_card)
+        gc_layout.addWidget(lbl_g_title)
+        gc_layout.addWidget(lbl_g_desc)
+        gc_layout.addStretch()
+        gc_layout.addWidget(btn_exp_group)
+        grid_layout.addWidget(group_card)
 
-        # CSV Export Card
-        csv_card = QFrame()
-        csv_card.setProperty("class", "card-widget")
-        cc_layout = QVBoxLayout(csv_card)
+        # Branch-wise Excel Export Card
+        branch_card = QFrame()
+        branch_card.setProperty("class", "card-widget")
+        bc_layout = QVBoxLayout(branch_card)
 
-        lbl_c_title = QLabel("Flat CSV Dataset")
-        lbl_c_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #10B981;")
-        lbl_c_desc = QLabel("Generates lightweight CSV file with formula injection security sanitization.")
-        lbl_c_desc.setWordWrap(True)
-        lbl_c_desc.setStyleSheet("color: #94A3B8;")
+        lbl_b_title = QLabel("Branch-wise Allocation Export")
+        lbl_b_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #8B5CF6;")
+        lbl_b_desc = QLabel("Generates Excel file with Branch-wise (Department) Venue & Time Slot assignments.")
+        lbl_b_desc.setWordWrap(True)
+        lbl_b_desc.setStyleSheet("color: #94A3B8;")
 
-        btn_exp_csv = QPushButton("Export Flat CSV (.csv)")
-        btn_exp_csv.setProperty("class", "secondary-btn")
-        btn_exp_csv.clicked.connect(self.export_csv)
+        btn_exp_branch = QPushButton("Export Branch-wise Excel")
+        btn_exp_branch.setProperty("class", "primary-btn")
+        btn_exp_branch.setStyleSheet("background-color: #8B5CF6;")
+        btn_exp_branch.clicked.connect(self.export_branch_excel)
 
-        cc_layout.addWidget(lbl_c_title)
-        cc_layout.addWidget(lbl_c_desc)
-        cc_layout.addStretch()
-        cc_layout.addWidget(btn_exp_csv)
-        grid_layout.addWidget(csv_card)
+        bc_layout.addWidget(lbl_b_title)
+        bc_layout.addWidget(lbl_b_desc)
+        bc_layout.addStretch()
+        bc_layout.addWidget(btn_exp_branch)
+        grid_layout.addWidget(branch_card)
 
-        # PDF Attendance Sheet Card
-        pdf_card = QFrame()
-        pdf_card.setProperty("class", "card-widget")
-        pc_layout = QVBoxLayout(pdf_card)
+        # Master Excel & Reports Card
+        master_card = QFrame()
+        master_card.setProperty("class", "card-widget")
+        mc_layout = QVBoxLayout(master_card)
 
-        lbl_p_title = QLabel("Printable PDF Attendance Sheets")
-        lbl_p_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #8B5CF6;")
-        lbl_p_desc = QLabel("Generates print-ready PDF attendance rosters with student signature columns.")
-        lbl_p_desc.setWordWrap(True)
-        lbl_p_desc.setStyleSheet("color: #94A3B8;")
+        lbl_m_title = QLabel("Master Report & Formats")
+        lbl_m_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #10B981;")
+        lbl_m_desc = QLabel("Generates Master Excel report side-by-side or PDF Attendance sheets.")
+        lbl_m_desc.setWordWrap(True)
+        lbl_m_desc.setStyleSheet("color: #94A3B8;")
 
-        btn_exp_pdf = QPushButton("Generate Attendance PDF (.pdf)")
+        btn_exp_master = QPushButton("Export Master Excel")
+        btn_exp_master.setProperty("class", "secondary-btn")
+        btn_exp_master.clicked.connect(self.export_master_excel)
+
+        btn_exp_pdf = QPushButton("Generate Attendance PDF")
         btn_exp_pdf.setProperty("class", "secondary-btn")
         btn_exp_pdf.clicked.connect(self.export_pdf)
 
-        pc_layout.addWidget(lbl_p_title)
-        pc_layout.addWidget(lbl_p_desc)
-        pc_layout.addStretch()
-        pc_layout.addWidget(btn_exp_pdf)
-        grid_layout.addWidget(pdf_card)
+        mc_layout.addWidget(lbl_m_title)
+        mc_layout.addWidget(lbl_m_desc)
+        mc_layout.addStretch()
+        mc_layout.addWidget(btn_exp_master)
+        mc_layout.addWidget(btn_exp_pdf)
+        grid_layout.addWidget(master_card)
 
         layout.addLayout(grid_layout)
 
-    def export_excel(self):
+    def export_group_excel(self):
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "Save Group-wise Allocation Export", str(EXPORTS_DIR / "Group-wise Allocation.xlsx"), "Excel Files (*.xlsx)"
+        )
+        if dest:
+            try:
+                out = ExportService.export_group_wise_excel(Path(dest))
+                QMessageBox.information(self, "Export Complete", f"Successfully exported Group-wise Excel file to:\n{out}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", str(e))
+
+    def export_branch_excel(self):
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "Save Branch-wise Allocation Export", str(EXPORTS_DIR / "Branch-wise Allocation.xlsx"), "Excel Files (*.xlsx)"
+        )
+        if dest:
+            try:
+                out = ExportService.export_branch_wise_excel(Path(dest))
+                QMessageBox.information(self, "Export Complete", f"Successfully exported Branch-wise Excel file to:\n{out}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", str(e))
+
+    def export_master_excel(self):
         dest, _ = QFileDialog.getSaveFileName(
             self, "Save Master Excel Export", str(EXPORTS_DIR / "Master_Allocation_Report.xlsx"), "Excel Files (*.xlsx)"
         )
         if dest:
             try:
                 out = ExportService.export_excel_master(Path(dest))
-                QMessageBox.information(self, "Export Complete", f"Successfully exported Excel workbook to:\n{out}")
+                QMessageBox.information(self, "Export Complete", f"Successfully exported Master Excel workbook to:\n{out}")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", str(e))
 
