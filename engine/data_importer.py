@@ -57,15 +57,9 @@ class DataImporter:
             df_renamed = df.rename(columns=column_mapping)
             
             # Verify required columns exist
-            for req in ['usn', 'full_name']:
+            for req in ['student_id', 'full_name', 'department']:
                 if req not in df_renamed.columns:
                     raise ValidationError(f"Required field '{req}' is missing in column mapping.")
-
-            if 'department' not in df_renamed.columns:
-                if 'program' in df_renamed.columns:
-                    df_renamed['department'] = df_renamed['program']
-                else:
-                    df_renamed['department'] = 'General'
 
             new_count = 0
             updated_count = 0
@@ -93,23 +87,23 @@ class DataImporter:
 
             for idx, row in df_renamed.iterrows():
                 row_num = idx + 2  # Excel 1-based header offset
-                raw_usn = str(row['usn']).strip() if pd.notna(row['usn']) else ""
+                raw_stu_id = str(row['student_id']).strip() if pd.notna(row['student_id']) else ""
+                raw_usn = raw_stu_id
                 raw_name = str(row['full_name']).strip() if pd.notna(row['full_name']) else ""
                 raw_dept = str(row['department']).strip() if pd.notna(row['department']) else ""
                 raw_prog = str(row.get('program', 'B.Tech')).strip() if pd.notna(row.get('program')) else "B.Tech"
                 raw_gender = str(row.get('gender', 'Unknown')) if pd.notna(row.get('gender')) else "Unknown"
-                raw_stu_id = str(row.get('student_id', '')).strip() if pd.notna(row.get('student_id')) else None
                 raw_stu_num = str(row.get('student_number', '')).strip() if pd.notna(row.get('student_number')) else None
 
-                if not raw_usn or raw_usn.lower() in ['nan', 'none', 'null']:
-                    warnings.append(f"Row {row_num}: Skipped record due to blank USN.")
+                if not raw_stu_id or raw_stu_id.lower() in ['nan', 'none', 'null']:
+                    warnings.append(f"Row {row_num}: Skipped record due to blank Student ID.")
                     continue
                 if not raw_name or raw_name.lower() in ['nan', 'none', 'null']:
-                    warnings.append(f"Row {row_num} (USN: {raw_usn}): Skipped record due to blank name.")
+                    warnings.append(f"Row {row_num} (Student ID: {raw_stu_id}): Skipped record due to blank name.")
                     continue
                 if not raw_dept or raw_dept.lower() in ['nan', 'none', 'null']:
-                    warnings.append(f"Row {row_num} (USN: {raw_usn}): Missing department, assigned 'General'.")
-                    raw_dept = "General"
+                    warnings.append(f"Row {row_num} (Student ID: {raw_stu_id}): Skipped record due to blank department.")
+                    continue
 
                 clean_usn_key = raw_usn.upper()
                 gender_enum = Gender.parse(raw_gender)
@@ -117,7 +111,7 @@ class DataImporter:
                 dept_obj = Repository.get_or_create_department(session, raw_dept)
                 prog_obj = Repository.get_or_create_program(session, raw_prog)
 
-                # Check if USN exists in DB
+                # Check if Student ID (mapped to USN) exists in DB
                 if clean_usn_key in existing_students_map:
                     stu = existing_students_map[clean_usn_key]
                     if stu.import_history_id is None:
@@ -126,11 +120,11 @@ class DataImporter:
                     # Update fields if faculty corrected typo, preserving allocation!
                     changed = False
                     if stu.full_name != raw_name:
-                        warnings.append(f"USN {raw_usn}: Updated name from '{stu.full_name}' to '{raw_name}'.")
+                        warnings.append(f"Student ID {raw_stu_id}: Updated name from '{stu.full_name}' to '{raw_name}'.")
                         stu.full_name = raw_name
                         changed = True
                     if stu.department_id != dept_obj.id:
-                        warnings.append(f"USN {raw_usn}: Updated department to '{dept_obj.name}'. Existing allocations preserved.")
+                        warnings.append(f"Student ID {raw_stu_id}: Updated department to '{dept_obj.name}'. Existing allocations preserved.")
                         stu.department_id = dept_obj.id
                         changed = True
                     if stu.gender != gender_enum.value:
@@ -140,7 +134,7 @@ class DataImporter:
                     # Reactivate if inactive
                     if stu.status == StudentStatus.INACTIVE.value:
                         stu.status = StudentStatus.ACTIVE.value
-                        warnings.append(f"USN {raw_usn}: Reactivated student status to Active.")
+                        warnings.append(f"Student ID {raw_stu_id}: Reactivated student status to Active.")
                         changed = True
 
                     if changed:
@@ -152,7 +146,7 @@ class DataImporter:
                     for existing_name, ex_usn in existing_names_list:
                         similarity = fuzz.token_sort_ratio(raw_name.lower(), existing_name.lower())
                         if similarity >= NEAR_DUPLICATE_THRESHOLD:
-                            warnings.append(f"Row {row_num}: Near-duplicate name warning! '{raw_name}' (USN: {raw_usn}) is {similarity}% similar to existing student '{existing_name}' (USN: {ex_usn}).")
+                            warnings.append(f"Row {row_num}: Near-duplicate name warning! '{raw_name}' (Student ID: {raw_stu_id}) is {similarity}% similar to existing student '{existing_name}' (Student ID: {ex_usn}).")
                             break
 
                     new_stu = Student(
