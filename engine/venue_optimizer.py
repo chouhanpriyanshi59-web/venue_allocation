@@ -167,21 +167,38 @@ class VenueOptimizer:
     def _partition_venues_by_group(
         cls,
         venues: List[Venue],
-        group_counts: Dict[str, int]
+        group_counts: Dict[str, int],
+        venue_group_locks: Dict[int, str] = None
     ) -> Dict[str, List[Venue]]:
         """
         Partitions available active venues among active student groups for a single time slot,
-        guaranteeing that every venue is assigned to at most ONE group in this slot.
+        guaranteeing that every venue is assigned to at most ONE group in this slot,
+        respecting any pre-existing group locks.
         """
-        if not group_counts or not venues:
-            return {}
+        if venue_group_locks is None:
+            venue_group_locks = {}
+
+        assigned: Dict[str, List[Venue]] = {g: [] for g in group_counts}
+        assigned_caps: Dict[str, int] = {g: 0 for g in group_counts}
+
+        # First, pre-assign locked venues to their respective groups
+        unlocked_venues = []
+        for v in venues:
+            if v.id in venue_group_locks:
+                locked_group = venue_group_locks[v.id]
+                if locked_group in assigned:
+                    assigned[locked_group].append(v)
+                    assigned_caps[locked_group] += v.capacity
+            else:
+                unlocked_venues.append(v)
 
         active_groups = [g for g, cnt in group_counts.items() if cnt > 0]
         if not active_groups:
-            return {}
+            return assigned
 
         if len(active_groups) == 1:
-            return {active_groups[0]: list(venues)}
+            assigned[active_groups[0]].extend(unlocked_venues)
+            return assigned
 
         sorted_groups = sorted(active_groups, key=lambda g: (-group_counts[g], g))
 
@@ -193,10 +210,7 @@ class VenueOptimizer:
             exact = (total_venue_capacity * group_counts[g]) / max(1, total_students)
             group_target_caps[g] = int(round(exact))
 
-        sorted_venues = sorted(venues, key=lambda v: (-v.capacity, v.id))
-
-        assigned: Dict[str, List[Venue]] = {g: [] for g in sorted_groups}
-        assigned_caps: Dict[str, int] = {g: 0 for g in sorted_groups}
+        sorted_venues = sorted(unlocked_venues, key=lambda v: (-v.capacity, v.id))
 
         for v in sorted_venues:
             best_group = None
@@ -455,7 +469,14 @@ class VenueOptimizer:
 
                     # Determine active venues with remaining capacity in this slot
                     avail_venues = []
+                    venue_dept_locks = {}
                     for v in venues:
+                        allocated_sample = session.query(Student).filter(
+                            Student.is_deleted == False,
+                            Student.branch_venue_id == v.id,
+                            Student.branch_time_slot_id == t_slot.id
+                        ).first()
+
                         db_alloc_count = session.query(Student).filter(
                             Student.is_deleted == False,
                             Student.branch_venue_id == v.id,
@@ -464,6 +485,8 @@ class VenueOptimizer:
                         rem_cap = max(0, v.capacity - db_alloc_count)
                         if rem_cap > 0:
                             avail_venues.append(Venue(id=v.id, name=v.name, capacity=rem_cap, is_active=True))
+                            if allocated_sample:
+                                venue_dept_locks[v.id] = allocated_sample.department_id or 0
 
                     # Track remaining venue capacities in this time slot
                     venue_rem_caps: Dict[int, int] = {v.id: v.capacity for v in avail_venues}
@@ -475,8 +498,11 @@ class VenueOptimizer:
 
                         N = len(d_students)
 
-                        # Filter available venues in this time slot with remaining capacity > 0
-                        current_avail_venues = [v for v in avail_venues if venue_rem_caps[v.id] > 0]
+                        # Filter available venues in this time slot with remaining capacity > 0 and compatible with dept_id
+                        current_avail_venues = [
+                            v for v in avail_venues 
+                            if venue_rem_caps[v.id] > 0 and (v.id not in venue_dept_locks or venue_dept_locks[v.id] == dept_id)
+                        ]
                         if not current_avail_venues:
                             break
 
@@ -611,7 +637,14 @@ class VenueOptimizer:
 
                     # Determine active venues with remaining capacity in this slot
                     avail_venues = []
+                    venue_group_locks = {}
                     for v in venues:
+                        allocated_sample = session.query(Student).filter(
+                            Student.is_deleted == False,
+                            Student.group_venue_id == v.id,
+                            Student.group_time_slot_id == t_slot.id
+                        ).first()
+
                         db_alloc_count = session.query(Student).filter(
                             Student.is_deleted == False,
                             Student.group_venue_id == v.id,
@@ -620,11 +653,13 @@ class VenueOptimizer:
                         rem_cap = max(0, v.capacity - db_alloc_count)
                         if rem_cap > 0:
                             avail_venues.append(Venue(id=v.id, name=v.name, capacity=rem_cap, is_active=True))
+                            if allocated_sample:
+                                venue_group_locks[v.id] = allocated_sample.group_name or "Unassigned"
 
                     if not avail_venues:
                         continue
 
-                    partitioned_venues = cls._partition_venues_by_group(avail_venues, active_group_counts)
+                    partitioned_venues = cls._partition_venues_by_group(avail_venues, active_group_counts, venue_group_locks)
 
                     for g_name, g_venues in partitioned_venues.items():
                         if not g_venues:

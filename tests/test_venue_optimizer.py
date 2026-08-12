@@ -440,6 +440,74 @@ def test_insufficient_capacity_handling():
 
     session.close()
 
+def test_group_isolation_incremental_locking():
+    session = SessionLocal()
+
+    d1 = Department(name="CSE", code="CSE")
+    d2 = Department(name="ECE", code="ECE")
+    session.add_all([d1, d2])
+    session.flush()
+
+    # Create 250 Group A students and 250 Group B students
+    for i in range(250):
+        s1 = Student(
+            usn=f"1DS21GA{i:03d}",
+            full_name=f"GA Stu {i}",
+            gender="Male" if i % 2 == 0 else "Female",
+            department_id=d1.id if i % 2 == 0 else d2.id,
+            group_name="Group A",
+            status="Active"
+        )
+        s2 = Student(
+            usn=f"1DS21GB{i:03d}",
+            full_name=f"GB Stu {i}",
+            gender="Male" if i % 2 == 0 else "Female",
+            department_id=d1.id if i % 2 == 0 else d2.id,
+            group_name="Group B",
+            status="Active"
+        )
+        session.add_all([s1, s2])
+
+    # 2 Venues: ECE Hall (500), Civil Hall (200)
+    v1 = Venue(name="ECE Seminar Hall", capacity=500, is_active=True)
+    v2 = Venue(name="Civil Hall", capacity=200, is_active=True)
+    ts = TimeSlot(slot_name="Slot 1", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    session.add_all([v1, v2, ts])
+    session.commit()
+
+    # First run:
+    # ECE Hall (500) will allocate all 250 Group A students.
+    # Civil Hall (200) will allocate 200 Group B students.
+    # 50 Group B students will remain unallocated.
+    res1 = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
+    assert res1.newly_allocated_venues == 450
+    assert len(res1.warnings) == 1
+    assert "Group B has insufficient venue capacity" in res1.warnings[0]
+
+    session.expire_all()
+
+    # Verify database state after run 1
+    v1_group = session.query(Student.group_name).filter(Student.group_venue_id == v1.id).distinct().all()
+    v2_group = session.query(Student.group_name).filter(Student.group_venue_id == v2.id).distinct().all()
+    assert [g[0] for g in v1_group] == ["Group A"]
+    assert [g[0] for g in v2_group] == ["Group B"]
+
+    # Second run (without adding capacity):
+    # The remaining 50 Group B students cannot go to ECE Hall because it is locked to Group A.
+    # Since Civil Hall is full, they should not be allocated.
+    res2 = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
+    assert res2.newly_allocated_venues == 0
+    assert len(res2.warnings) == 1
+    assert "Group B has insufficient venue capacity" in res2.warnings[0]
+
+    session.expire_all()
+
+    # Verify no group isolation violations
+    v1_group_after = session.query(Student.group_name).filter(Student.group_venue_id == v1.id).distinct().all()
+    assert [g[0] for g in v1_group_after] == ["Group A"]
+
+    session.close()
+
 
 
 
