@@ -33,8 +33,81 @@ class ExportService:
         return value
 
     @classmethod
+    def _clean_group_name(cls, g_name: Optional[str]) -> str:
+        if not g_name:
+            return "Unassigned"
+        if g_name.startswith("Group "):
+            return g_name[6:]
+        return g_name
+
+    @classmethod
+    def _get_slot_timings(cls, session: Session) -> Tuple[str, str, str]:
+        """Queries and sorts TimeSlots from the database to return Slot 1, Slot 2, and Slot 3 timings."""
+        time_slots = session.query(TimeSlot).all()
+        
+        def format_time_str(t_str):
+            try:
+                t_str = re.sub(r'\s+', ' ', t_str.strip().upper())
+                # match hour:minute AM/PM
+                match = re.match(r'(\d+):(\d+)\s*(AM|PM)', t_str)
+                if match:
+                    hour = int(match.group(1))
+                    minute = int(match.group(2))
+                    period = match.group(3)
+                    return f"{hour}:{minute:02d} {period}"
+                # Handle cases without minutes: "9 AM"
+                match_no_min = re.match(r'(\d+)\s*(AM|PM)', t_str)
+                if match_no_min:
+                    hour = int(match_no_min.group(1))
+                    period = match_no_min.group(2)
+                    return f"{hour}:00 {period}"
+            except:
+                pass
+            return t_str
+
+        def parse_time_to_minutes(t_str):
+            try:
+                t_str = re.sub(r'\s+', ' ', t_str.strip().upper())
+                match = re.match(r'(\d+):(\d+)\s*(AM|PM)', t_str)
+                if match:
+                    hour = int(match.group(1))
+                    minute = int(match.group(2))
+                    period = match.group(3)
+                    if period == "PM" and hour < 12:
+                        hour += 12
+                    elif period == "AM" and hour == 12:
+                        hour = 0
+                    return hour * 60 + minute
+                match_no_min = re.match(r'(\d+)\s*(AM|PM)', t_str)
+                if match_no_min:
+                    hour = int(match_no_min.group(1))
+                    period = match_no_min.group(2)
+                    if period == "PM" and hour < 12:
+                        hour += 12
+                    elif period == "AM" and hour == 12:
+                        hour = 0
+                    return hour * 60
+            except:
+                pass
+            return 0
+
+        sorted_slots = sorted(time_slots, key=lambda ts: (ts.day_number, parse_time_to_minutes(ts.start_time), ts.slot_name or "", ts.id))
+        
+        slot1_val = ""
+        slot2_val = ""
+        slot3_val = ""
+        if len(sorted_slots) >= 1:
+            slot1_val = f"{format_time_str(sorted_slots[0].start_time)} - {format_time_str(sorted_slots[0].end_time)}"
+        if len(sorted_slots) >= 2:
+            slot2_val = f"{format_time_str(sorted_slots[1].start_time)} - {format_time_str(sorted_slots[1].end_time)}"
+        if len(sorted_slots) >= 3:
+            slot3_val = f"{format_time_str(sorted_slots[2].start_time)} - {format_time_str(sorted_slots[2].end_time)}"
+            
+        return slot1_val, slot2_val, slot3_val
+
+    @classmethod
     def export_group_wise_excel(cls, destination_path: Path) -> Path:
-        """Generates Group-wise Allocation Excel file."""
+        """Generates Group-wise Allocation Excel file in the standard layout."""
         session: Session = SessionLocal()
         try:
             wb = openpyxl.Workbook()
@@ -42,11 +115,12 @@ class ExportService:
             ws.title = "Group-wise Allocation"
 
             students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
+            slot1, slot2, slot3 = cls._get_slot_timings(session)
 
             header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
             header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 
-            columns = ["USN", "Student ID", "Full Name", "Department", "Gender", "Group", "Group Venue", "Group Time Slot"]
+            columns = ["Sl No.", "Student ID", "USN", "Name", "Branch", "Group", "Slot 1", "Slot 2", "Slot 3", "Venue"]
             ws.append(columns)
 
             for col_num in range(1, len(columns) + 1):
@@ -55,16 +129,28 @@ class ExportService:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
-            for s in students:
+            for idx, s in enumerate(students, 1):
+                branch_val = ""
+                if s.department:
+                    branch_val = s.department.code or s.department.name
+                
+                venue_val = "Unassigned"
+                if s.group_venue:
+                    venue_val = s.group_venue.name
+                elif s.venue:
+                    venue_val = s.venue.name
+
                 ws.append([
-                    cls.sanitize_cell(s.usn),
+                    idx,
                     cls.sanitize_cell(s.student_id or ""),
+                    cls.sanitize_cell(s.usn),
                     cls.sanitize_cell(s.full_name),
-                    cls.sanitize_cell(s.department.name if s.department else ""),
-                    cls.sanitize_cell(s.gender),
-                    cls.sanitize_cell(s.group_name or "Unassigned"),
-                    cls.sanitize_cell(s.group_venue.name if s.group_venue else "Unassigned"),
-                    cls.sanitize_cell(s.group_time_slot.slot_name if s.group_time_slot else "Unassigned")
+                    cls.sanitize_cell(branch_val),
+                    cls.sanitize_cell(cls._clean_group_name(s.group_name)),
+                    cls.sanitize_cell(slot1),
+                    cls.sanitize_cell(slot2),
+                    cls.sanitize_cell(slot3),
+                    cls.sanitize_cell(venue_val)
                 ])
 
             for col in ws.columns:
@@ -81,7 +167,7 @@ class ExportService:
 
     @classmethod
     def export_branch_wise_excel(cls, destination_path: Path) -> Path:
-        """Generates Branch-wise Allocation Excel file."""
+        """Generates Branch-wise Allocation Excel file in the standard layout."""
         session: Session = SessionLocal()
         try:
             wb = openpyxl.Workbook()
@@ -89,11 +175,12 @@ class ExportService:
             ws.title = "Branch-wise Allocation"
 
             students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
+            slot1, slot2, slot3 = cls._get_slot_timings(session)
 
             header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
             header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 
-            columns = ["USN", "Student ID", "Full Name", "Department", "Gender", "Branch Venue", "Branch Time Slot"]
+            columns = ["Sl No.", "Student ID", "USN", "Name", "Branch", "Group", "Slot 1", "Slot 2", "Slot 3", "Venue"]
             ws.append(columns)
 
             for col_num in range(1, len(columns) + 1):
@@ -102,15 +189,28 @@ class ExportService:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
-            for s in students:
+            for idx, s in enumerate(students, 1):
+                branch_val = ""
+                if s.department:
+                    branch_val = s.department.code or s.department.name
+
+                venue_val = "Unassigned"
+                if s.branch_venue:
+                    venue_val = s.branch_venue.name
+                elif s.venue:
+                    venue_val = s.venue.name
+
                 ws.append([
-                    cls.sanitize_cell(s.usn),
+                    idx,
                     cls.sanitize_cell(s.student_id or ""),
+                    cls.sanitize_cell(s.usn),
                     cls.sanitize_cell(s.full_name),
-                    cls.sanitize_cell(s.department.name if s.department else ""),
-                    cls.sanitize_cell(s.gender),
-                    cls.sanitize_cell(s.branch_venue.name if s.branch_venue else "Unassigned"),
-                    cls.sanitize_cell(s.branch_time_slot.slot_name if s.branch_time_slot else "Unassigned")
+                    cls.sanitize_cell(branch_val),
+                    cls.sanitize_cell(cls._clean_group_name(s.group_name)),
+                    cls.sanitize_cell(slot1),
+                    cls.sanitize_cell(slot2),
+                    cls.sanitize_cell(slot3),
+                    cls.sanitize_cell(venue_val)
                 ])
 
             for col in ws.columns:
@@ -127,18 +227,19 @@ class ExportService:
 
     @classmethod
     def export_excel_master(cls, destination_path: Path) -> Path:
-        """Generates a styled Master Excel workbook displaying both Group-wise and Branch-wise allocations."""
+        """Generates a styled Master Excel workbook in the standard layout."""
         session: Session = SessionLocal()
         try:
             wb = openpyxl.Workbook()
             wb.remove(wb.active)
 
             students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
+            slot1, slot2, slot3 = cls._get_slot_timings(session)
 
             header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
             header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 
-            columns = ["USN", "Student ID", "Full Name", "Gender", "Department", "Program", "Group", "Group Venue", "Group Time Slot", "Branch Venue", "Branch Time Slot", "Status"]
+            columns = ["Sl No.", "Student ID", "USN", "Name", "Branch", "Group", "Slot 1", "Slot 2", "Slot 3", "Venue"]
 
             ws_master = wb.create_sheet(title="Master Allocation")
             ws_master.append(columns)
@@ -149,20 +250,30 @@ class ExportService:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
-            for s in students:
+            for idx, s in enumerate(students, 1):
+                branch_val = ""
+                if s.department:
+                    branch_val = s.department.code or s.department.name
+
+                venue_val = "Unassigned"
+                if s.group_venue:
+                    venue_val = s.group_venue.name
+                elif s.branch_venue:
+                    venue_val = s.branch_venue.name
+                elif s.venue:
+                    venue_val = s.venue.name
+
                 row = [
-                    cls.sanitize_cell(s.usn),
+                    idx,
                     cls.sanitize_cell(s.student_id or ""),
+                    cls.sanitize_cell(s.usn),
                     cls.sanitize_cell(s.full_name),
-                    cls.sanitize_cell(s.gender),
-                    cls.sanitize_cell(s.department.name if s.department else ""),
-                    cls.sanitize_cell(s.program.name if s.program else ""),
-                    cls.sanitize_cell(s.group_name or "Unassigned"),
-                    cls.sanitize_cell(s.group_venue.name if s.group_venue else (s.venue.name if s.venue else "Unassigned")),
-                    cls.sanitize_cell(s.group_time_slot.slot_name if s.group_time_slot else (s.time_slot.slot_name if s.time_slot else "Unassigned")),
-                    cls.sanitize_cell(s.branch_venue.name if s.branch_venue else "Unassigned"),
-                    cls.sanitize_cell(s.branch_time_slot.slot_name if s.branch_time_slot else "Unassigned"),
-                    cls.sanitize_cell(s.status)
+                    cls.sanitize_cell(branch_val),
+                    cls.sanitize_cell(cls._clean_group_name(s.group_name)),
+                    cls.sanitize_cell(slot1),
+                    cls.sanitize_cell(slot2),
+                    cls.sanitize_cell(slot3),
+                    cls.sanitize_cell(venue_val)
                 ]
                 ws_master.append(row)
 
@@ -181,29 +292,42 @@ class ExportService:
 
     @classmethod
     def export_csv(cls, destination_path: Path) -> Path:
-        """Generates flat CSV export."""
+        """Generates flat CSV export matching the standard columns."""
         session: Session = SessionLocal()
         try:
             students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
+            slot1, slot2, slot3 = cls._get_slot_timings(session)
 
-            headers = ["USN", "Student ID", "Full Name", "Gender", "Department", "Program", "Group", "Venue", "Time Slot", "Status"]
+            headers = ["Sl No.", "Student ID", "USN", "Name", "Branch", "Group", "Slot 1", "Slot 2", "Slot 3", "Venue"]
 
             with open(destination_path, mode="w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow(headers)
 
-                for s in students:
+                for idx, s in enumerate(students, 1):
+                    branch_val = ""
+                    if s.department:
+                        branch_val = s.department.code or s.department.name
+
+                    venue_val = "Unassigned"
+                    if s.group_venue:
+                        venue_val = s.group_venue.name
+                    elif s.branch_venue:
+                        venue_val = s.branch_venue.name
+                    elif s.venue:
+                        venue_val = s.venue.name
+
                     writer.writerow([
-                        cls.sanitize_cell(s.usn),
+                        idx,
                         cls.sanitize_cell(s.student_id or ""),
+                        cls.sanitize_cell(s.usn),
                         cls.sanitize_cell(s.full_name),
-                        cls.sanitize_cell(s.gender),
-                        cls.sanitize_cell(s.department.name if s.department else ""),
-                        cls.sanitize_cell(s.program.name if s.program else ""),
-                        cls.sanitize_cell(s.group_name or "Unassigned"),
-                        cls.sanitize_cell(s.venue.name if s.venue else "Unassigned"),
-                        cls.sanitize_cell(s.time_slot.slot_name if s.time_slot else "Unassigned"),
-                        cls.sanitize_cell(s.status)
+                        cls.sanitize_cell(branch_val),
+                        cls.sanitize_cell(cls._clean_group_name(s.group_name)),
+                        cls.sanitize_cell(slot1),
+                        cls.sanitize_cell(slot2),
+                        cls.sanitize_cell(slot3),
+                        cls.sanitize_cell(venue_val)
                     ])
 
             return destination_path

@@ -64,6 +64,58 @@ class VenueOptimizer:
         )
 
     @classmethod
+    def select_minimal_venues(cls, venues: List[Venue], target_capacity: int) -> List[Venue]:
+        """
+        Finds a subset of venues that minimizes the number of venues used to satisfy target_capacity.
+        If target_capacity is greater than or equal to total capacity, returns all venues.
+        """
+        if not venues or target_capacity <= 0:
+            return []
+        
+        total_cap = sum(v.capacity for v in venues)
+        if target_capacity >= total_cap:
+            return list(venues)
+        
+        best_subset = None
+        best_size = len(venues) + 1
+        best_cap = float('inf')
+        
+        # Sort by capacity descending, then by id ascending for determinism
+        sorted_venues = sorted(venues, key=lambda v: (-v.capacity, v.id))
+        
+        def search(index, current_subset, current_cap):
+            nonlocal best_subset, best_size, best_cap
+            
+            if len(current_subset) > best_size:
+                return
+                
+            if current_cap >= target_capacity:
+                if len(current_subset) < best_size:
+                    best_size = len(current_subset)
+                    best_subset = list(current_subset)
+                    best_cap = current_cap
+                elif len(current_subset) == best_size:
+                    # Choose subset with smaller capacity (closer to target_capacity to reduce waste)
+                    if current_cap < best_cap:
+                        best_subset = list(current_subset)
+                        best_cap = current_cap
+                return
+                
+            if index >= len(sorted_venues):
+                return
+                
+            # Branch 1: Include sorted_venues[index]
+            current_subset.append(sorted_venues[index])
+            search(index + 1, current_subset, current_cap + sorted_venues[index].capacity)
+            current_subset.pop()
+            
+            # Branch 2: Exclude sorted_venues[index]
+            search(index + 1, current_subset, current_cap)
+            
+        search(0, [], 0)
+        return sorted(best_subset, key=lambda v: v.id) if best_subset is not None else list(venues)
+
+    @classmethod
     def _distribute_venue_capacities(
         cls,
         venues: List[Venue],
@@ -521,16 +573,13 @@ class VenueOptimizer:
                             venue_targets = {best_venue.id: count_to_take}
                         else:
                             # PRIORITY 2, 3 & 4: Multi-Venue Minimal Split
-                            # Sort available venues by largest remaining capacity
-                            current_avail_venues.sort(key=lambda v: (-venue_rem_caps[v.id], v.id))
-
-                            running_cap = 0
-                            k_venues: List[Venue] = []
-                            for v in current_avail_venues:
-                                k_venues.append(v)
-                                running_cap += venue_rem_caps[v.id]
-                                if running_cap >= N:
-                                    break
+                            # Use select_minimal_venues to find the best minimal subset of venues
+                            temp_venues = [
+                                Venue(id=v.id, name=v.name, capacity=venue_rem_caps[v.id], is_active=True)
+                                for v in current_avail_venues
+                            ]
+                            k_venues = cls.select_minimal_venues(temp_venues, N)
+                            running_cap = sum(venue_rem_caps[v.id] for v in k_venues)
 
                             count_to_take = min(N, running_cap)
                             slot_d_students = d_students[:count_to_take]
@@ -672,10 +721,12 @@ class VenueOptimizer:
                         g_slot_capacity = sum(v.capacity for v in g_venues)
                         count_to_take = min(len(g_students), g_slot_capacity)
 
+                        minimal_g_venues = cls.select_minimal_venues(g_venues, count_to_take)
+
                         slot_g_students = g_students[:count_to_take]
                         groups_unallocated[g_name] = g_students[count_to_take:]
 
-                        venue_targets = cls._distribute_venue_capacities(g_venues, count_to_take)
+                        venue_targets = cls._distribute_venue_capacities(minimal_g_venues, count_to_take)
 
                         strata_students: Dict[Tuple[int, str], List[Student]] = {}
                         for s in slot_g_students:
@@ -687,7 +738,7 @@ class VenueOptimizer:
                         matrix_alloc = cls._allocate_strata_matrix(venue_targets, strata_students)
                         strata_indices: Dict[Tuple[int, str], int] = {k: 0 for k in strata_students}
 
-                        for v in g_venues:
+                        for v in minimal_g_venues:
                             v_id = v.id
                             for s_key, s_list in strata_students.items():
                                 assign_count = matrix_alloc.get((v_id, s_key), 0)

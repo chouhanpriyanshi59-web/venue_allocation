@@ -1,13 +1,105 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QMessageBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QInputDialog, QLineEdit
+    QHeaderView, QInputDialog, QLineEdit, QDialog, QFormLayout,
+    QTimeEdit, QDialogButtonBox
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTime
 from database.connection import SessionLocal
 from database.models import Venue, TimeSlot
 from database.repository import Repository
 from engine.venue_optimizer import VenueOptimizer
+
+class TimeSlotInputDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Time Slot")
+        self.setModal(True)
+        self.resize(320, 180)
+        
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1E293B;
+                color: #F8FAFC;
+            }
+            QLabel {
+                color: #94A3B8;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QLineEdit {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 6px;
+            }
+            QTimeEdit {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 6px;
+            }
+            QPushButton {
+                background-color: #38BDF8;
+                color: #0F172A;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #7DD3FC;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+        
+        self.txt_name = QLineEdit()
+        self.txt_name.setPlaceholderText("e.g. Morning Session")
+        
+        # Start Time
+        self.time_start = QTimeEdit()
+        self.time_start.setDisplayFormat("h:mm AP")
+        self.time_start.setTime(QTime(9, 0))
+        
+        # End Time
+        self.time_end = QTimeEdit()
+        self.time_end.setDisplayFormat("h:mm AP")
+        self.time_end.setTime(QTime(10, 0))
+        
+        form_layout.addRow("Slot Name:", self.txt_name)
+        form_layout.addRow("Start Time:", self.time_start)
+        form_layout.addRow("End Time:", self.time_end)
+        
+        layout.addLayout(form_layout)
+        
+        # Buttons
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+    def get_values(self):
+        name = self.txt_name.text().strip()
+        
+        def format_qtime(qt_time):
+            hour = qt_time.hour()
+            minute = qt_time.minute()
+            period = "AM"
+            if hour >= 12:
+                period = "PM"
+                if hour > 12:
+                    hour -= 12
+            elif hour == 0:
+                hour = 12
+            return f"{hour}:{minute:02d} {period}"
+            
+        start_str = format_qtime(self.time_start.time())
+        end_str = format_qtime(self.time_end.time())
+        return name, start_str, end_str
 
 class VenueAllocationView(QWidget):
     venue_allocation_done = Signal()
@@ -209,20 +301,18 @@ class VenueAllocationView(QWidget):
                 session.close()
 
     def add_timeslot(self):
-        name, ok1 = QInputDialog.getText(self, "Add Time Slot", "Slot Name (e.g. Morning Session):")
-        if ok1 and name.strip():
-            start, ok2 = QInputDialog.getText(self, "Start Time", "Start Time (e.g. 09:30 AM):")
-            if ok2 and start.strip():
-                end, ok3 = QInputDialog.getText(self, "End Time", "End Time (e.g. 11:30 AM):")
-                if ok3 and end.strip():
-                    session = SessionLocal()
-                    try:
-                        Repository.get_or_create_time_slot(session, name.strip(), start.strip(), end.strip())
-                        session.commit()
-                        self.refresh_tables()
-                        self.venue_allocation_done.emit()
-                    finally:
-                        session.close()
+        dialog = TimeSlotInputDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            name, start, end = dialog.get_values()
+            if name:
+                session = SessionLocal()
+                try:
+                    Repository.get_or_create_time_slot(session, name, start, end)
+                    session.commit()
+                    self.refresh_tables()
+                    self.venue_allocation_done.emit()
+                finally:
+                    session.close()
 
     def delete_timeslot(self, slot_id: int, slot_name: str):
         reply = QMessageBox.question(

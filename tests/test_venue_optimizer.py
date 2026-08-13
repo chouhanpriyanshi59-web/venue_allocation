@@ -108,8 +108,8 @@ def test_proportional_and_balanced_venue_allocation():
             session.add(s)
 
     # 3. Add 2 Venues (ECE Seminar Hall: 500, Civil Hall: 200) & 1 Slot
-    v1 = Venue(name="ECE Seminar Hall", capacity=500, is_active=True)
-    v2 = Venue(name="Civil Hall", capacity=200, is_active=True)
+    v1 = Venue(name="ECE Seminar Hall", capacity=400, is_active=True)
+    v2 = Venue(name="Civil Hall", capacity=160, is_active=True)
     ts = TimeSlot(slot_name="Morning Session", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
     session.add_all([v1, v2, ts])
     session.commit()
@@ -507,6 +507,34 @@ def test_group_isolation_incremental_locking():
     assert [g[0] for g in v1_group_after] == ["Group A"]
 
     session.close()
+
+def test_select_minimal_venues():
+    # Test cases for the select_minimal_venues classmethod
+    from database.models import Venue
+    v_a = Venue(id=1, name="A", capacity=200)
+    v_b = Venue(id=2, name="B", capacity=200)
+    v_c = Venue(id=3, name="C", capacity=200)
+    v_d = Venue(id=4, name="D", capacity=200)
+    
+    # 500 students -> should return 3 venues
+    res = VenueOptimizer.select_minimal_venues([v_a, v_b, v_c, v_d], 500)
+    assert len(res) == 3
+    
+    # 350 students -> should return 2 venues
+    res2 = VenueOptimizer.select_minimal_venues([v_a, v_b, v_c, v_d], 350)
+    assert len(res2) == 2
+    
+    # 750 students -> should return all 4 venues
+    res3 = VenueOptimizer.select_minimal_venues([v_a, v_b, v_c, v_d], 750)
+    assert len(res3) == 4
+    
+    # Different capacities: A=500, B=200, C=200. Target = 450.
+    v_500 = Venue(id=1, name="A", capacity=500)
+    v_200a = Venue(id=2, name="B", capacity=200)
+    v_200b = Venue(id=3, name="C", capacity=200)
+    res4 = VenueOptimizer.select_minimal_venues([v_500, v_200a, v_200b], 450)
+    assert len(res4) == 1
+    assert res4[0].name == "A"
 
 
 
