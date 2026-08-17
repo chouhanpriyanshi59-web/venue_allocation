@@ -21,7 +21,7 @@ from ui.views.dashboard_view import DashboardView
 from ui.views.import_view import ImportView
 from ui.views.student_view import StudentView
 from ui.views.group_view import GroupAllocationView
-from ui.views.venue_view import VenueAllocationView
+from ui.views.venue_view import VenueAllocationViewA, VenueAllocationViewB
 from ui.views.branch_venue_view import BranchVenueAllocationView
 from ui.views.backup_view import BackupRollbackView
 from ui.views.history_view import AllocationHistoryView
@@ -71,7 +71,8 @@ class MainWindow(QMainWindow):
             ("import", "📥 Import Excel", ImportView),
             ("students", "👥 Student Database", StudentView),
             ("group", "🔀 Group Allocation", GroupAllocationView),
-            ("venue_group", "🏛️ Group Venue Alloc", VenueAllocationView),
+            ("venue_group_a", "🏛️ Group A Venue Alloc", VenueAllocationViewA),
+            ("venue_group_b", "🏛️ Group B Venue Alloc", VenueAllocationViewB),
             ("venue_branch", "🏢 Branch Venue Alloc", BranchVenueAllocationView),
             ("history", "⏳ Allocation History", AllocationHistoryView),
             ("backup", "🛡️ Backup & Rollback", BackupRollbackView),

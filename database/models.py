@@ -29,12 +29,17 @@ class Venue(Base):
     __tablename__ = "venues"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     capacity: Mapped[int] = mapped_column(Integer, nullable=False)
     location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    group_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
 
     students: Mapped[List["Student"]] = relationship("Student", foreign_keys="Student.venue_id", back_populates="venue")
+
+    __table_args__ = (
+        UniqueConstraint('name', 'group_name', name='uq_venue_group'),
+    )
 
 class TimeSlot(Base):
     __tablename__ = "time_slots"
@@ -44,11 +49,12 @@ class TimeSlot(Base):
     start_time: Mapped[str] = mapped_column(String(20), nullable=False)  # e.g., "09:00 AM"
     end_time: Mapped[str] = mapped_column(String(20), nullable=False)    # e.g., "11:00 AM"
     day_number: Mapped[int] = mapped_column(Integer, default=1)
+    group_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
 
     students: Mapped[List["Student"]] = relationship("Student", foreign_keys="Student.time_slot_id", back_populates="time_slot")
 
     __table_args__ = (
-        UniqueConstraint('slot_name', 'day_number', name='uq_slot_day'),
+        UniqueConstraint('slot_name', 'day_number', 'group_name', name='uq_slot_day_group'),
     )
 
 class Student(Base):

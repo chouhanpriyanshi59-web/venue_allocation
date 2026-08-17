@@ -41,9 +41,12 @@ class ExportService:
         return g_name
 
     @classmethod
-    def _get_slot_timings(cls, session: Session) -> Tuple[str, str, str]:
+    def _get_slot_timings(cls, session: Session, group_name: Optional[str] = None) -> Tuple[str, str, str]:
         """Queries and sorts TimeSlots from the database to return Slot 1, Slot 2, and Slot 3 timings."""
-        time_slots = session.query(TimeSlot).all()
+        query = session.query(TimeSlot)
+        if group_name:
+            query = query.filter(TimeSlot.group_name == group_name)
+        time_slots = query.all()
         
         def format_time_str(t_str):
             try:
@@ -115,7 +118,12 @@ class ExportService:
             ws.title = "Group-wise Allocation"
 
             students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
-            slot1, slot2, slot3 = cls._get_slot_timings(session)
+            
+            slots_by_group = {
+                "Group A": cls._get_slot_timings(session, "Group A"),
+                "Group B": cls._get_slot_timings(session, "Group B"),
+                "Unassigned": cls._get_slot_timings(session, None)
+            }
 
             header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
             header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
@@ -140,6 +148,12 @@ class ExportService:
                 elif s.venue:
                     venue_val = s.venue.name
 
+                g_name = s.group_name or "Unassigned"
+                if g_name not in slots_by_group:
+                    slots_by_group[g_name] = cls._get_slot_timings(session, g_name)
+
+                slot1_val, slot2_val, slot3_val = slots_by_group[g_name]
+
                 ws.append([
                     idx,
                     cls.sanitize_cell(s.student_id or ""),
@@ -147,9 +161,9 @@ class ExportService:
                     cls.sanitize_cell(s.full_name),
                     cls.sanitize_cell(branch_val),
                     cls.sanitize_cell(cls._clean_group_name(s.group_name)),
-                    cls.sanitize_cell(slot1),
-                    cls.sanitize_cell(slot2),
-                    cls.sanitize_cell(slot3),
+                    cls.sanitize_cell(slot1_val),
+                    cls.sanitize_cell(slot2_val),
+                    cls.sanitize_cell(slot3_val),
                     cls.sanitize_cell(venue_val)
                 ])
 
@@ -234,7 +248,12 @@ class ExportService:
             wb.remove(wb.active)
 
             students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
-            slot1, slot2, slot3 = cls._get_slot_timings(session)
+            
+            slots_by_group = {
+                "Group A": cls._get_slot_timings(session, "Group A"),
+                "Group B": cls._get_slot_timings(session, "Group B"),
+                "Unassigned": cls._get_slot_timings(session, None)
+            }
 
             header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
             header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
@@ -263,6 +282,12 @@ class ExportService:
                 elif s.venue:
                     venue_val = s.venue.name
 
+                g_name = s.group_name or "Unassigned"
+                if g_name not in slots_by_group:
+                    slots_by_group[g_name] = cls._get_slot_timings(session, g_name)
+
+                slot1_val, slot2_val, slot3_val = slots_by_group[g_name]
+
                 row = [
                     idx,
                     cls.sanitize_cell(s.student_id or ""),
@@ -270,9 +295,9 @@ class ExportService:
                     cls.sanitize_cell(s.full_name),
                     cls.sanitize_cell(branch_val),
                     cls.sanitize_cell(cls._clean_group_name(s.group_name)),
-                    cls.sanitize_cell(slot1),
-                    cls.sanitize_cell(slot2),
-                    cls.sanitize_cell(slot3),
+                    cls.sanitize_cell(slot1_val),
+                    cls.sanitize_cell(slot2_val),
+                    cls.sanitize_cell(slot3_val),
                     cls.sanitize_cell(venue_val)
                 ]
                 ws_master.append(row)
@@ -296,7 +321,12 @@ class ExportService:
         session: Session = SessionLocal()
         try:
             students = session.query(Student).filter(Student.is_deleted == False).order_by(Student.usn.asc()).all()
-            slot1, slot2, slot3 = cls._get_slot_timings(session)
+            
+            slots_by_group = {
+                "Group A": cls._get_slot_timings(session, "Group A"),
+                "Group B": cls._get_slot_timings(session, "Group B"),
+                "Unassigned": cls._get_slot_timings(session, None)
+            }
 
             headers = ["Sl No.", "Student ID", "USN", "Name", "Branch", "Group", "Slot 1", "Slot 2", "Slot 3", "Venue"]
 
@@ -317,6 +347,12 @@ class ExportService:
                     elif s.venue:
                         venue_val = s.venue.name
 
+                    g_name = s.group_name or "Unassigned"
+                    if g_name not in slots_by_group:
+                        slots_by_group[g_name] = cls._get_slot_timings(session, g_name)
+
+                    slot1_val, slot2_val, slot3_val = slots_by_group[g_name]
+
                     writer.writerow([
                         idx,
                         cls.sanitize_cell(s.student_id or ""),
@@ -324,9 +360,9 @@ class ExportService:
                         cls.sanitize_cell(s.full_name),
                         cls.sanitize_cell(branch_val),
                         cls.sanitize_cell(cls._clean_group_name(s.group_name)),
-                        cls.sanitize_cell(slot1),
-                        cls.sanitize_cell(slot2),
-                        cls.sanitize_cell(slot3),
+                        cls.sanitize_cell(slot1_val),
+                        cls.sanitize_cell(slot2_val),
+                        cls.sanitize_cell(slot3_val),
                         cls.sanitize_cell(venue_val)
                     ])
 

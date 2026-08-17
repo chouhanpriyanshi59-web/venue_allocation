@@ -61,5 +61,36 @@ def init_db():
         if "branch_venue_allocated_at" not in columns:
             conn.exec_driver_sql("ALTER TABLE students ADD COLUMN branch_venue_allocated_at DATETIME")
         
+        # Auto-migration for venues
+        cursor = conn.exec_driver_sql("PRAGMA table_info(venues)")
+        venues_cols = [row[1] for row in cursor.fetchall()]
+        if "group_name" not in venues_cols:
+            conn.exec_driver_sql("ALTER TABLE venues ADD COLUMN group_name VARCHAR(50)")
+        
+        conn.exec_driver_sql("DROP INDEX IF EXISTS ix_venues_name")
+        conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS ix_venues_name_group ON venues (name, group_name)")
+
+        # Auto-migration for time_slots
+        cursor = conn.exec_driver_sql("PRAGMA table_info(time_slots)")
+        time_slots_cols = [row[1] for row in cursor.fetchall()]
+        if "group_name" not in time_slots_cols:
+            conn.exec_driver_sql("ALTER TABLE time_slots RENAME TO time_slots_old")
+            conn.exec_driver_sql("""
+                CREATE TABLE time_slots (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    slot_name VARCHAR(50) NOT NULL,
+                    start_time VARCHAR(20) NOT NULL,
+                    end_time VARCHAR(20) NOT NULL,
+                    day_number INTEGER NOT NULL,
+                    group_name VARCHAR(50),
+                    CONSTRAINT uq_slot_day_group UNIQUE (slot_name, day_number, group_name)
+                )
+            """)
+            conn.exec_driver_sql("""
+                INSERT INTO time_slots (id, slot_name, start_time, end_time, day_number, group_name)
+                SELECT id, slot_name, start_time, end_time, day_number, NULL FROM time_slots_old
+            """)
+            conn.exec_driver_sql("DROP TABLE time_slots_old")
+
         conn.commit()
 

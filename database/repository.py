@@ -154,11 +154,16 @@ class Repository:
         return prog
 
     @staticmethod
-    def get_or_create_venue(session: Session, name: str, capacity: int, location: Optional[str] = None) -> Venue:
+    def get_or_create_venue(session: Session, name: str, capacity: int, location: Optional[str] = None, group_name: Optional[str] = None) -> Venue:
         clean_name = name.strip()
-        venue = session.query(Venue).filter(func.lower(Venue.name) == clean_name.lower()).first()
+        query = session.query(Venue).filter(func.lower(Venue.name) == clean_name.lower())
+        if group_name:
+            query = query.filter(Venue.group_name == group_name)
+        else:
+            query = query.filter(Venue.group_name.is_(None))
+        venue = query.first()
         if not venue:
-            venue = Venue(name=clean_name, capacity=capacity, location=location)
+            venue = Venue(name=clean_name, capacity=capacity, location=location, group_name=group_name)
             session.add(venue)
             session.flush()
         else:
@@ -168,14 +173,19 @@ class Repository:
         return venue
 
     @staticmethod
-    def get_or_create_time_slot(session: Session, slot_name: str, start_time: str, end_time: str, day_number: int = 1) -> TimeSlot:
+    def get_or_create_time_slot(session: Session, slot_name: str, start_time: str, end_time: str, day_number: int = 1, group_name: Optional[str] = None) -> TimeSlot:
         clean_slot = slot_name.strip()
-        ts = session.query(TimeSlot).filter(
+        query = session.query(TimeSlot).filter(
             func.lower(TimeSlot.slot_name) == clean_slot.lower(),
             TimeSlot.day_number == day_number
-        ).first()
+        )
+        if group_name:
+            query = query.filter(TimeSlot.group_name == group_name)
+        else:
+            query = query.filter(TimeSlot.group_name.is_(None))
+        ts = query.first()
         if not ts:
-            ts = TimeSlot(slot_name=clean_slot, start_time=start_time, end_time=end_time, day_number=day_number)
+            ts = TimeSlot(slot_name=clean_slot, start_time=start_time, end_time=end_time, day_number=day_number, group_name=group_name)
             session.add(ts)
             session.flush()
         return ts
@@ -347,6 +357,14 @@ class Repository:
             {Student.venue_id: None, Student.venue_allocated_at: None},
             synchronize_session=False
         )
+        session.query(Student).filter(Student.group_venue_id == venue_id).update(
+            {Student.group_venue_id: None, Student.group_venue_allocated_at: None},
+            synchronize_session=False
+        )
+        session.query(Student).filter(Student.branch_venue_id == venue_id).update(
+            {Student.branch_venue_id: None, Student.branch_venue_allocated_at: None},
+            synchronize_session=False
+        )
         session.delete(venue)
 
         audit = AuditLog(
@@ -369,6 +387,14 @@ class Repository:
         slot_name = ts.slot_name
         session.query(Student).filter(Student.time_slot_id == time_slot_id).update(
             {Student.time_slot_id: None, Student.venue_allocated_at: None},
+            synchronize_session=False
+        )
+        session.query(Student).filter(Student.group_time_slot_id == time_slot_id).update(
+            {Student.group_time_slot_id: None, Student.group_venue_allocated_at: None},
+            synchronize_session=False
+        )
+        session.query(Student).filter(Student.branch_time_slot_id == time_slot_id).update(
+            {Student.branch_time_slot_id: None, Student.branch_venue_allocated_at: None},
             synchronize_session=False
         )
         session.delete(ts)

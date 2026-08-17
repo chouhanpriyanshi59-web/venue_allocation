@@ -104,8 +104,9 @@ class TimeSlotInputDialog(QDialog):
 class VenueAllocationView(QWidget):
     venue_allocation_done = Signal()
 
-    def __init__(self):
+    def __init__(self, group_name: str):
         super().__init__()
+        self.group_name = group_name
         self.init_ui()
 
     def init_ui(self):
@@ -114,7 +115,7 @@ class VenueAllocationView(QWidget):
         layout.setSpacing(16)
 
         # Header Title
-        lbl_header = QLabel("Group-wise Venue Allocation")
+        lbl_header = QLabel(f"{self.group_name} Venue Allocation")
         lbl_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #F8FAFC;")
         layout.addWidget(lbl_header)
 
@@ -194,10 +195,10 @@ class VenueAllocationView(QWidget):
         footer_card.setProperty("class", "card-widget")
         footer_layout = QHBoxLayout(footer_card)
 
-        lbl_desc = QLabel("Group-wise mode maintains Group A and Group B dedicated venues.")
+        lbl_desc = QLabel(f"{self.group_name} mode maintains dedicated venues and independent slots.")
         lbl_desc.setStyleSheet("color: #94A3B8; font-size: 12px;")
 
-        btn_run_milp = QPushButton("Allocate Group-wise Venues")
+        btn_run_milp = QPushButton(f"Allocate {self.group_name} Venues")
         btn_run_milp.setProperty("class", "primary-btn")
         btn_run_milp.setStyleSheet("padding: 8px 20px; font-weight: bold; font-size: 13px;")
         btn_run_milp.clicked.connect(self.run_optimization)
@@ -213,7 +214,7 @@ class VenueAllocationView(QWidget):
         session = SessionLocal()
         try:
             # Refresh Venues
-            venues = session.query(Venue).all()
+            venues = session.query(Venue).filter(Venue.group_name == self.group_name).all()
             self.venue_table.setRowCount(0)
             for v in venues:
                 row = self.venue_table.rowCount()
@@ -229,7 +230,7 @@ class VenueAllocationView(QWidget):
                 self.venue_table.setCellWidget(row, 3, btn_del_v)
 
             # Refresh Time Slots
-            slots = session.query(TimeSlot).all()
+            slots = session.query(TimeSlot).filter(TimeSlot.group_name == self.group_name).all()
             self.slot_table.setRowCount(0)
             for s in slots:
                 row = self.slot_table.rowCount()
@@ -245,12 +246,12 @@ class VenueAllocationView(QWidget):
                 self.slot_table.setCellWidget(row, 3, btn_del_s)
 
             # Capacity Report
-            cap_report = VenueOptimizer.check_capacity(session, mode="group_wise")
+            cap_report = VenueOptimizer.check_capacity(session, target_group=self.group_name, mode="group_wise")
             if cap_report.is_sufficient:
-                self.lbl_cap_status.setText("Group Capacity Check Passed ✓")
+                self.lbl_cap_status.setText(f"{self.group_name} Capacity Check Passed ✓")
                 self.lbl_cap_status.setStyleSheet("font-size: 15px; font-weight: bold; color: #10B981;")
                 self.lbl_cap_details.setText(
-                    f"Total unassigned group students: {cap_report.total_students:,} | Total venue capacity available: {cap_report.total_capacity:,}."
+                    f"Total unassigned {self.group_name.lower()} students: {cap_report.total_students:,} | Total venue capacity available: {cap_report.total_capacity:,}."
                 )
             else:
                 self.lbl_cap_status.setText("WARNING: Insufficient Venue Capacity! ⚠️")
@@ -270,7 +271,7 @@ class VenueAllocationView(QWidget):
             if ok2:
                 session = SessionLocal()
                 try:
-                    Repository.get_or_create_venue(session, name.strip(), cap)
+                    Repository.get_or_create_venue(session, name.strip(), cap, group_name=self.group_name)
                     session.commit()
                     self.refresh_tables()
                     self.venue_allocation_done.emit()
@@ -307,7 +308,7 @@ class VenueAllocationView(QWidget):
             if name:
                 session = SessionLocal()
                 try:
-                    Repository.get_or_create_time_slot(session, name, start, end)
+                    Repository.get_or_create_time_slot(session, name, start, end, group_name=self.group_name)
                     session.commit()
                     self.refresh_tables()
                     self.venue_allocation_done.emit()
@@ -341,8 +342,8 @@ class VenueAllocationView(QWidget):
         # Mandatory Warning Dialog for destructive reallocation
         reply = QMessageBox.warning(
             self,
-            "Confirm Global Venue Reallocation",
-            "WARNING: Performing a Venue Allocation will completely clear ALL existing active venue assignments and recalculate a fresh, randomized allocation for all students.\n\n"
+            f"Confirm {self.group_name} Venue Reallocation",
+            f"WARNING: Performing a Venue Allocation will completely clear ALL existing active venue assignments for {self.group_name} and recalculate a fresh, randomized allocation for all students in this group.\n\n"
             "This operation cannot be undone. Are you sure you want to proceed?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
@@ -351,7 +352,7 @@ class VenueAllocationView(QWidget):
             return
 
         try:
-            res = VenueOptimizer.optimize_allocations(mode="group_wise")
+            res = VenueOptimizer.optimize_allocations(target_group=self.group_name, mode="group_wise")
             if res.warnings and any("insufficient venue capacity" in w for w in res.warnings):
                 warning_text = "\n\n---\n\n".join(res.warnings)
                 QMessageBox.warning(
@@ -362,13 +363,23 @@ class VenueAllocationView(QWidget):
             else:
                 QMessageBox.information(
                     self,
-                    "Group-wise Venue Allocation Complete",
-                    f"Successfully completed Group-wise Venue Allocation!\n\n"
-                    f"Assigned {res.newly_allocated_venues} students to group venues and time slots."
+                    f"{self.group_name} Venue Allocation Complete",
+                    f"Successfully completed {self.group_name} Venue Allocation!\n\n"
+                    f"Assigned {res.newly_allocated_venues} students to {self.group_name} venues and time slots."
                 )
             self.refresh_tables()
             self.venue_allocation_done.emit()
         except Exception as e:
             QMessageBox.critical(self, "Optimization Error", str(e))
+
+
+class VenueAllocationViewA(VenueAllocationView):
+    def __init__(self):
+        super().__init__(group_name="Group A")
+
+
+class VenueAllocationViewB(VenueAllocationView):
+    def __init__(self):
+        super().__init__(group_name="Group B")
 
 
