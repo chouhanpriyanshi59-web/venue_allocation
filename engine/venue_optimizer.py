@@ -759,8 +759,132 @@ class VenueOptimizer:
 
             else:
                 # --- GROUP-WISE ALLOCATION (INDEPENDENT) ---
+                # Group active students by department
+                dept_students: Dict[int, List[Student]] = {}
+                for s in unallocated_students:
+                    d_id = s.department_id or 0
+                    if d_id not in dept_students:
+                        dept_students[d_id] = []
+                    dept_students[d_id].append(s)
+
+                small_depts = {}
+                large_depts = {}
+                for d_id, stus in dept_students.items():
+                    if len(stus) <= 20:
+                        small_depts[d_id] = stus
+                    else:
+                        large_depts[d_id] = stus
+
+                # Keep track of global group counts to balance groups
+                total_A = sum(1 for s in unallocated_students if s.group_name == "Group A")
+                total_B = sum(1 for s in unallocated_students if s.group_name == "Group B")
+
+                small_dept_assigned_students = set()
+                sorted_small_depts = sorted(small_depts.items(), key=lambda x: len(x[1]), reverse=True)
+
+                for d_id, stus in sorted_small_depts:
+                    S = len(stus)
+                    # Count current Group A and Group B students in this department
+                    S_A = sum(1 for s in stus if s.group_name == "Group A")
+                    S_B = sum(1 for s in stus if s.group_name == "Group B")
+
+                    # Determine preferred and alternative group based on global balance
+                    diff_A = abs((total_A + S_B) - (total_B - S_B))
+                    diff_B = abs((total_A - S_A) - (total_B + S_A))
+
+                    if diff_A <= diff_B:
+                        g_pref, g_alt = "Group A", "Group B"
+                    else:
+                        g_pref, g_alt = "Group B", "Group A"
+
+                    def find_best_venue_slot_for_small_dept(group: str, size: int):
+                        locked_candidates = []
+                        empty_candidates = []
+
+                        for v in venues:
+                            db_alloc_count = session.query(Student).filter(
+                                Student.is_deleted == False,
+                                Student.group_venue_id == v.id
+                            ).count()
+                            rem_cap = max(0, v.capacity - db_alloc_count)
+
+                            if rem_cap >= size:
+                                for t_slot in time_slots:
+                                    allocated_sample = session.query(Student).filter(
+                                        Student.is_deleted == False,
+                                        Student.group_venue_id == v.id,
+                                        Student.group_time_slot_id == t_slot.id
+                                    ).first()
+
+                                    lock = allocated_sample.group_name if allocated_sample else None
+
+                                    if lock == group:
+                                        locked_candidates.append((v, t_slot, rem_cap))
+                                    elif lock is None:
+                                        empty_candidates.append((v, t_slot, rem_cap))
+
+                        # Sort locked candidates by remaining capacity ascending (best fit)
+                        locked_candidates.sort(key=lambda x: (x[2], x[0].id))
+                        if locked_candidates:
+                            return locked_candidates[0][0], locked_candidates[0][1]
+
+                        # Sort empty candidates by physical venue capacity ascending (best fit)
+                        empty_candidates.sort(key=lambda x: (x[0].capacity, x[0].id))
+                        if empty_candidates:
+                            return empty_candidates[0][0], empty_candidates[0][1]
+
+                        return None, None
+
+                    v_selected, ts_selected = find_best_venue_slot_for_small_dept(g_pref, S)
+                    assigned_group = g_pref
+                    if not v_selected:
+                        # Try alternative group
+                        v_selected, ts_selected = find_best_venue_slot_for_small_dept(g_alt, S)
+                        assigned_group = g_alt
+
+                    if v_selected:
+                        for s in stus:
+                            s.group_name = assigned_group
+                            s.group_venue_id = v_selected.id
+                            s.group_time_slot_id = ts_selected.id
+                            s.group_venue_allocated_at = now
+                            s.venue_id = v_selected.id
+                            s.time_slot_id = ts_selected.id
+                            s.venue_allocated_at = now
+                            allocated_count += 1
+                            small_dept_assigned_students.add(s.id)
+
+                        # Update total group counts globally
+                        if assigned_group == "Group A":
+                            total_A += S_B
+                            total_B -= S_B
+                        else:
+                            total_A -= S_A
+                            total_B += S_A
+
+                        session.flush()
+                    else:
+                        for s in stus:
+                            s.group_name = g_pref
+                            s.group_venue_id = None
+                            s.group_time_slot_id = None
+                            s.group_venue_allocated_at = None
+                            s.venue_id = None
+                            s.time_slot_id = None
+                            s.venue_allocated_at = None
+                            small_dept_assigned_students.add(s.id)
+
+                        dept = session.query(Department).filter(Department.id == d_id).first()
+                        dept_name = dept.name if dept else f"Department {d_id}"
+                        warnings_list.append(
+                            f"{S} {dept_name} students could not be allocated because no single available venue has sufficient capacity."
+                        )
+
+                # Now prepare groups for large department allocation
                 groups_unallocated: Dict[str, List[Student]] = {}
                 for s in unallocated_students:
+                    if s.id in small_dept_assigned_students:
+                        continue
                     g_key = s.group_name or "Unassigned"
                     if g_key not in groups_unallocated:
                         groups_unallocated[g_key] = []
