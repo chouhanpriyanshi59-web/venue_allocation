@@ -15,34 +15,103 @@ class Repository:
     @staticmethod
     def get_or_create_department(session: Session, name: str, code: Optional[str] = None) -> Department:
         clean_name = name.strip()
-        dept_code = (code or clean_name).strip().upper()[:20]
-        if len(dept_code) > 4 and not code and " " in clean_name:
-            words = [w for w in clean_name.replace("&", "").split() if w]
-            if len(words) >= 2:
-                derived_code = "".join([w[0] for w in words]).upper()[:10]
-            else:
-                derived_code = clean_name[:4].upper()
-        else:
-            derived_code = dept_code
+        
+        # Standardize mappings
+        NAME_TO_CODE = {
+            "civil engineering": "CV",
+            "chemical engineering": "CE",
+            "computer science engineering": "CS",
+            "computer science & engineering": "CS",
+            "computer science": "CS",
+            "cyber security": "CY",
+            "biotechnology": "BT",
+            "electrical & electronics engineering": "EE",
+            "electrical and electronics engineering": "EE",
+            "electronics & communication engineering": "EC",
+            "electronics and communication engineering": "EC",
+            "electronics & telecommunication engineering": "ET",
+            "electronics and telecommunication engineering": "ET",
+            "industrial engineering & management": "IM",
+            "industrial engineering and management": "IM",
+            "mechanical engineering": "ME",
+            "data science": "DS",
+            "artificial intelligence & machine learning": "AI",
+            "artificial intelligence and machine learning": "AI"
+        }
+        
+        CODE_TO_NAME = {
+            "CS": "Computer Science Engineering",
+            "CSE": "Computer Science Engineering",
+            "AI": "Artificial Intelligence & Machine Learning",
+            "AIML": "Artificial Intelligence & Machine Learning",
+            "DS": "Data Science",
+            "CY": "Cyber Security",
+            "EC": "Electronics & Communication Engineering",
+            "ECE": "Electronics & Communication Engineering",
+            "ET": "Electronics & Telecommunication Engineering",
+            "ETE": "Electronics & Telecommunication Engineering",
+            "EE": "Electrical & Electronics Engineering",
+            "EEE": "Electrical & Electronics Engineering",
+            "CE": "Chemical Engineering",
+            "ME": "Mechanical Engineering",
+            "IM": "Industrial Engineering & Management",
+            "IEM": "Industrial Engineering & Management",
+            "CV": "Civil Engineering",
+            "BT": "Biotechnology"
+        }
 
-        # 1. Search for existing department matching code OR name (case-insensitive)
+        # Determine target name and code
+        derived_code = None
+        target_name = clean_name
+        
+        # 1. Resolve canonical name if clean_name matches a key in NAME_TO_CODE
+        norm_name_lower = clean_name.lower()
+        if norm_name_lower in NAME_TO_CODE:
+            derived_code = NAME_TO_CODE[norm_name_lower]
+            target_name = CODE_TO_NAME[derived_code]
+            
+        # 2. Check if clean_name is actually a code (e.g., "CE", "CV", "CSE")
+        norm_name_upper = clean_name.upper()
+        if not derived_code and norm_name_upper in CODE_TO_NAME:
+            derived_code = norm_name_upper
+            target_name = CODE_TO_NAME[norm_name_upper]
+
+        # 3. If code is explicitly provided, override derived_code and potentially resolve name
+        if code:
+            code_upper = code.strip().upper()
+            derived_code = code_upper
+            if code_upper in CODE_TO_NAME and (not clean_name or clean_name.lower() in [c.lower() for c in CODE_TO_NAME.values()] or clean_name.upper() in CODE_TO_NAME):
+                target_name = CODE_TO_NAME[code_upper]
+
+        # 4. Fallback if still not resolved
+        if not derived_code:
+            dept_code = clean_name.upper()[:20]
+            if len(dept_code) > 4 and " " in clean_name:
+                words = [w for w in clean_name.replace("&", "").split() if w]
+                if len(words) >= 2:
+                    derived_code = "".join([w[0] for w in words]).upper()[:10]
+                else:
+                    derived_code = clean_name[:4].upper()
+            else:
+                derived_code = dept_code
+
+        # Search database strictly matching code OR name (case-insensitive)
         dept = session.query(Department).filter(
             or_(
                 func.lower(Department.code) == derived_code.lower(),
-                func.lower(Department.code) == clean_name.lower(),
-                func.lower(Department.name) == clean_name.lower()
+                func.lower(Department.name) == target_name.lower()
             )
         ).first()
 
         if not dept:
-            # 2. Ensure derived_code is strictly unique among existing codes
+            # Ensure unique derived_code
             base_code = derived_code
             counter = 1
             while session.query(Department).filter(func.lower(Department.code) == derived_code.lower()).first():
                 derived_code = f"{base_code[:15]}{counter}"
                 counter += 1
 
-            dept = Department(name=clean_name, code=derived_code)
+            dept = Department(name=target_name, code=derived_code)
             session.add(dept)
             session.flush()
 

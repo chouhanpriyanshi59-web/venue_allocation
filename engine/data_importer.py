@@ -108,7 +108,36 @@ class DataImporter:
                 clean_usn_key = raw_usn.upper()
                 gender_enum = Gender.parse(raw_gender)
 
-                dept_obj = Repository.get_or_create_department(session, raw_dept)
+                # Extract branch code from USN (e.g. "CE" or "CV" from "1RV26CE001")
+                usn_branch_code = None
+                if len(clean_usn_key) >= 7:
+                    potential_branch = clean_usn_key[5:7]
+                    if potential_branch.isalpha():
+                        usn_branch_code = potential_branch
+
+                CANONICAL_DEPARTMENTS = {
+                    "CS": "Computer Science Engineering",
+                    "AI": "Artificial Intelligence & Machine Learning",
+                    "DS": "Data Science",
+                    "CY": "Cyber Security",
+                    "EC": "Electronics & Communication Engineering",
+                    "ET": "Electronics & Telecommunication Engineering",
+                    "EE": "Electrical & Electronics Engineering",
+                    "CE": "Chemical Engineering",
+                    "ME": "Mechanical Engineering",
+                    "IM": "Industrial Engineering & Management",
+                    "CV": "Civil Engineering",
+                    "BT": "Biotechnology"
+                }
+
+                if usn_branch_code in CANONICAL_DEPARTMENTS:
+                    resolved_dept_name = CANONICAL_DEPARTMENTS[usn_branch_code]
+                    resolved_dept_code = usn_branch_code
+                else:
+                    resolved_dept_name = raw_dept
+                    resolved_dept_code = None
+
+                dept_obj = Repository.get_or_create_department(session, resolved_dept_name, resolved_dept_code)
                 prog_obj = Repository.get_or_create_program(session, raw_prog)
 
                 # Check if Student ID (mapped to USN) exists in DB
