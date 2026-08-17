@@ -39,7 +39,7 @@ def get_db_session():
 
 def init_db():
     """Creates all database tables defined in models and applies schema migrations."""
-    from database.models import Student, Department, Program, Venue, TimeSlot, ImportHistory, BackupHistory, AuditLog, AppSettings
+    from database.models import Student, Department, Program, Venue, TimeSlot, ImportHistory, BackupHistory, AuditLog, AppSettings, AllocationRun
     Base.metadata.create_all(bind=engine)
 
     # Auto-migration: ensure independent group/branch columns exist on students table

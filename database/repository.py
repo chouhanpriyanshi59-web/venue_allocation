@@ -5,7 +5,7 @@ from sqlalchemy import or_, and_, func
 from database.connection import SessionLocal
 from database.models import (
     Student, Department, Program, Venue, TimeSlot,
-    ImportHistory, AuditLog, AppSettings
+    ImportHistory, AuditLog, AppSettings, AllocationRun
 )
 from core.domain_models import StudentRecord, Gender, StudentStatus
 
@@ -313,4 +313,93 @@ class Repository:
         session.add(audit)
         session.commit()
         return True, f"Successfully deleted time slot '{slot_name}'."
+
+    @classmethod
+    def get_allocation_runs(cls, session: Session, mode: Optional[str] = None) -> List[AllocationRun]:
+        """Retrieves historical allocation runs, optionally filtered by mode."""
+        query = session.query(AllocationRun)
+        if mode:
+            query = query.filter(AllocationRun.mode == mode)
+        return query.order_by(AllocationRun.allocated_at.desc()).all()
+
+    @classmethod
+    def restore_allocation_run(cls, session: Session, run_id: int) -> Tuple[bool, str]:
+        """Restores a historical allocation run as the active allocation in the database."""
+        import json
+        run = session.query(AllocationRun).filter(AllocationRun.id == run_id).first()
+        if not run:
+            return False, "Allocation run not found."
+
+        is_branch_wise = run.mode == "branch_wise"
+        
+        # Clear existing active assignments for this mode first
+        if is_branch_wise:
+            session.query(Student).filter(
+                Student.is_deleted == False,
+                Student.status == "Active"
+            ).update({
+                Student.branch_venue_id: None,
+                Student.branch_time_slot_id: None,
+                Student.branch_venue_allocated_at: None
+            }, synchronize_session=False)
+        else:
+            session.query(Student).filter(
+                Student.is_deleted == False,
+                Student.status == "Active"
+            ).update({
+                Student.group_venue_id: None,
+                Student.group_time_slot_id: None,
+                Student.group_venue_allocated_at: None,
+                Student.venue_id: None,
+                Student.time_slot_id: None,
+                Student.venue_allocated_at: None
+            }, synchronize_session=False)
+
+        try:
+            assignments = json.loads(run.assignments_json)
+        except Exception as e:
+            return False, f"Failed to parse run assignments: {str(e)}"
+
+        # Pre-load venues and time slots for fast lookups
+        venues = {v.name: v.id for v in session.query(Venue).all()}
+        slots = {ts.slot_name: ts.id for ts in session.query(TimeSlot).all()}
+
+        # Build dict of USN -> assignment details
+        assignments_map = {a["usn"]: a for a in assignments}
+        
+        # Batch update students
+        students = session.query(Student).filter(
+            Student.is_deleted == False,
+            Student.status == "Active"
+        ).all()
+
+        restored_count = 0
+        for s in students:
+            if s.usn in assignments_map:
+                a = assignments_map[s.usn]
+                v_id = venues.get(a["venue_name"])
+                ts_id = slots.get(a["slot_name"])
+                if is_branch_wise:
+                    s.branch_venue_id = v_id
+                    s.branch_time_slot_id = ts_id
+                    s.branch_venue_allocated_at = run.allocated_at
+                else:
+                    s.group_venue_id = v_id
+                    s.group_time_slot_id = ts_id
+                    s.group_venue_allocated_at = run.allocated_at
+                    s.venue_id = v_id
+                    s.time_slot_id = ts_id
+                    s.venue_allocated_at = run.allocated_at
+                restored_count += 1
+
+        audit = AuditLog(
+            action="ALLOCATION_RESTORED",
+            entity_type="AllocationRun",
+            entity_id=str(run_id),
+            details=f"Restored active venue allocations to run ID {run_id} ({run.mode}). Restored {restored_count} student assignments."
+        )
+        session.add(audit)
+        session.commit()
+        return True, f"Successfully restored {restored_count} student assignments from allocation run."
+
 

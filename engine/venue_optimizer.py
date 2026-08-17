@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
-from database.models import Student, Department, Venue, TimeSlot, AuditLog
+from database.models import Student, Department, Venue, TimeSlot, AuditLog, AllocationRun
 from database.backup_manager import BackupManager
 from core.domain_models import AllocationResult, CapacityReport
 
@@ -30,10 +30,6 @@ class VenueOptimizer:
             Student.is_deleted == False,
             Student.status == "Active"
         )
-        if is_branch_wise:
-            query = query.filter(Student.branch_venue_id.is_(None))
-        else:
-            query = query.filter(Student.group_venue_id.is_(None))
 
         if target_group and not is_branch_wise:
             query = query.filter(Student.group_name == target_group)
@@ -436,6 +432,67 @@ class VenueOptimizer:
         return assigned
 
     @classmethod
+    def save_current_allocation_to_history(cls, session: Session, mode: str, config_info: Optional[dict] = None) -> Optional[AllocationRun]:
+        """Serializes the current active allocation in the database and saves it as an AllocationRun."""
+        import json
+        is_branch_wise = mode in ("branch_wise", "branch", "department_wise")
+
+        # Query active students who currently have a venue allocated in this mode
+        query = session.query(Student).filter(
+            Student.is_deleted == False,
+            Student.status == "Active"
+        )
+        if is_branch_wise:
+            query = query.filter(Student.branch_venue_id.isnot(None))
+        else:
+            query = query.filter(Student.group_venue_id.isnot(None))
+
+        allocated_students = query.all()
+        if not allocated_students:
+            return None
+
+        # Build list of assignments and find venues used
+        assignments = []
+        venues_used = set()
+        allocated_at = None
+
+        for s in allocated_students:
+            if is_branch_wise:
+                v_name = s.branch_venue.name if s.branch_venue else None
+                slot_name = s.branch_time_slot.slot_name if s.branch_time_slot else None
+                s_allocated_at = s.branch_venue_allocated_at
+            else:
+                v_name = s.group_venue.name if s.group_venue else None
+                slot_name = s.group_time_slot.slot_name if s.group_time_slot else None
+                s_allocated_at = s.group_venue_allocated_at
+
+            if v_name:
+                venues_used.add(v_name)
+            if s_allocated_at and (not allocated_at or s_allocated_at > allocated_at):
+                allocated_at = s_allocated_at
+
+            assignments.append({
+                "usn": s.usn,
+                "venue_name": v_name,
+                "slot_name": slot_name
+            })
+
+        if not allocated_at:
+            allocated_at = datetime.utcnow()
+
+        run = AllocationRun(
+            mode="branch_wise" if is_branch_wise else "group_wise",
+            allocated_at=allocated_at,
+            student_count=len(allocated_students),
+            venues_used=json.dumps(list(venues_used)),
+            config=json.dumps(config_info or {}),
+            assignments_json=json.dumps(assignments)
+        )
+        session.add(run)
+        session.flush()
+        return run
+
+    @classmethod
     def optimize_allocations(
         cls,
         target_group: Optional[str] = None,
@@ -455,16 +512,50 @@ class VenueOptimizer:
         try:
             is_branch_wise = mode in ("branch_wise", "branch", "department_wise")
 
+            # 1. Fetch current active configuration info for history
+            venues = session.query(Venue).filter(Venue.is_active == True).all()
+            time_slots = session.query(TimeSlot).all()
+            config_info = {
+                "venues": [{"name": v.name, "capacity": v.capacity} for v in venues],
+                "time_slots": [{"name": ts.slot_name, "start": ts.start_time, "end": ts.end_time} for ts in time_slots],
+                "allow_department_splits": allow_department_splits
+            }
+
+            # 2. Save existing allocations (if any) to history before clearing
+            cls.save_current_allocation_to_history(session, mode, config_info)
+
+            # 3. Clear ALL current active venue assignments in the database for this mode
+            if is_branch_wise:
+                session.query(Student).filter(
+                    Student.is_deleted == False,
+                    Student.status == "Active"
+                ).update({
+                    Student.branch_venue_id: None,
+                    Student.branch_time_slot_id: None,
+                    Student.branch_venue_allocated_at: None
+                }, synchronize_session=False)
+            else:
+                session.query(Student).filter(
+                    Student.is_deleted == False,
+                    Student.status == "Active"
+                ).update({
+                    Student.group_venue_id: None,
+                    Student.group_time_slot_id: None,
+                    Student.group_venue_allocated_at: None,
+                    Student.venue_id: None,
+                    Student.time_slot_id: None,
+                    Student.venue_allocated_at: None
+                }, synchronize_session=False)
+            session.flush()
+
+            # Now perform capacity check on all active students
             cap_report = cls.check_capacity(session, target_group, mode=mode)
 
+            # Query all active students (which are now unallocated since we just cleared the assignments)
             query = session.query(Student).filter(
                 Student.is_deleted == False,
                 Student.status == "Active"
             )
-            if is_branch_wise:
-                query = query.filter(Student.branch_venue_id.is_(None))
-            else:
-                query = query.filter(Student.group_venue_id.is_(None))
 
             if target_group and not is_branch_wise:
                 query = query.filter(Student.group_name == target_group)
@@ -504,8 +595,9 @@ class VenueOptimizer:
                         depts_unallocated[d_id] = []
                     depts_unallocated[d_id].append(s)
 
+                import random
                 for d_id in depts_unallocated:
-                    depts_unallocated[d_id].sort(key=lambda s: (s.usn or "", s.full_name or "", s.id))
+                    random.shuffle(depts_unallocated[d_id])
 
                 initial_dept_counts = {d_id: len(stus) for d_id, stus in depts_unallocated.items()}
 
@@ -623,6 +715,9 @@ class VenueOptimizer:
                                         s.branch_venue_allocated_at = now
                                         allocated_count += 1
 
+                    # Flush after finishing allocation for this slot to ensure correct overall capacity check for next slots
+                    session.flush()
+
                 # Verification Assertion: Ensure no venue in any slot contains multiple branches
                 allocated_pairs = session.query(
                     Student.branch_time_slot_id, Student.branch_venue_id, Student.department_id
@@ -671,8 +766,9 @@ class VenueOptimizer:
                         groups_unallocated[g_key] = []
                     groups_unallocated[g_key].append(s)
 
+                import random
                 for g_key in groups_unallocated:
-                    groups_unallocated[g_key].sort(key=lambda s: (s.usn or "", s.full_name or "", s.id))
+                    random.shuffle(groups_unallocated[g_key])
 
                 initial_group_counts = {g_name: len(stus) for g_name, stus in groups_unallocated.items()}
 
@@ -747,11 +843,13 @@ class VenueOptimizer:
                                         s.group_venue_id = v_id
                                         s.group_time_slot_id = t_slot.id
                                         s.group_venue_allocated_at = now
-                                        # Also populate venue_id / time_slot_id for backward compatibility
                                         s.venue_id = v_id
                                         s.time_slot_id = t_slot.id
                                         s.venue_allocated_at = now
                                         allocated_count += 1
+
+                    # Flush after finishing allocation for this slot to ensure correct overall capacity check for next slots
+                    session.flush()
 
                 # Verification Assertion: Ensure no venue in any slot contains multiple groups
                 allocated_pairs = session.query(
@@ -789,6 +887,9 @@ class VenueOptimizer:
                             f"Available Capacity: {avail_cap}\n"
                             f"Unallocated Students: {unallocated_cnt}"
                         )
+
+            # Save new allocations to history before committing
+            cls.save_current_allocation_to_history(session, mode, config_info)
 
             # Log audit
             audit_mode = "BRANCH_WISE" if is_branch_wise else "GROUP_WISE"

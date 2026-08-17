@@ -75,3 +75,51 @@ def test_user_requested_scenarios():
     assert report.total_capacity == 1200, f"Expected capacity to remain 1,200 after adding Slot 6, got {report.total_capacity}"
 
     session.close()
+
+def test_repeated_runs_produce_different_valid_allocations():
+    session = SessionLocal()
+
+    # Create active venues
+    v1 = Venue(name="Venue X", capacity=30, is_active=True)
+    v2 = Venue(name="Venue Y", capacity=30, is_active=True)
+    ts = TimeSlot(slot_name="Slot Alpha", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    session.add_all([v1, v2, ts])
+
+    # Create department
+    dept = Department(name="Information Science", code="ISE")
+    session.add(dept)
+    session.commit()
+
+    # Create 50 students
+    for i in range(50):
+        s = Student(
+            usn=f"1DS21IS{i:03d}",
+            full_name=f"ISE Student {i}",
+            gender="Male" if i % 2 == 0 else "Female",
+            department_id=dept.id,
+            group_name="Group A",
+            status="Active"
+        )
+        session.add(s)
+    session.commit()
+
+    # First Allocation Run
+    res1 = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
+    assert res1.newly_allocated_venues == 50
+
+    session.expire_all()
+    first_assignments = {s.usn: s.group_venue_id for s in session.query(Student).all()}
+
+    # Second Allocation Run
+    res2 = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
+    assert res2.newly_allocated_venues == 50
+
+    session.expire_all()
+    second_assignments = {s.usn: s.group_venue_id for s in session.query(Student).all()}
+
+    # Check that at least some student assignments have changed due to randomization (shuffle)
+    assignment_changes = sum(1 for usn, v_id in first_assignments.items() if second_assignments[usn] != v_id)
+    assert assignment_changes > 0, "Expected randomization to produce a different allocation pattern on second run"
+
+    session.close()
+

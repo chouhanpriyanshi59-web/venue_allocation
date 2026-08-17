@@ -45,10 +45,10 @@ def test_venue_capacity_check_and_optimization():
     session.add(ts2)
     session.commit()
 
-    # Total capacity remains 20 < 25 -> Allocation still has warnings and allocates 0 newly
+    # Total capacity remains 20 < 25 -> Allocation still has warnings and allocates 20 (complete reallocation)
     res2 = VenueOptimizer.optimize_allocations(auto_backup=False)
     assert any("insufficient venue capacity" in w for w in res2.warnings)
-    assert res2.newly_allocated_venues == 0
+    assert res2.newly_allocated_venues == 20
     assert session.query(Student).filter(Student.group_venue_id.isnot(None)).count() == 20
 
     # Now, increase physical venue capacity from 10 to 20 for v1 -> total capacity becomes 30 >= 25 -> Should succeed!
@@ -57,7 +57,7 @@ def test_venue_capacity_check_and_optimization():
     session.commit()
 
     res3 = VenueOptimizer.optimize_allocations(auto_backup=False)
-    assert res3.newly_allocated_venues == 5
+    assert res3.newly_allocated_venues == 25
     assert session.query(Student).filter(Student.group_venue_id.isnot(None)).count() == 25
     session.close()
 
@@ -431,9 +431,9 @@ def test_insufficient_capacity_handling():
     session.add(v_new)
     session.commit()
 
-    # Run Group-wise Allocation again
+    # Run Group-wise Allocation again (complete reallocation)
     res2 = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
-    assert res2.newly_allocated_venues == 50
+    assert res2.newly_allocated_venues == 150
     assert len(res2.warnings) == 0
 
     session.expire_all()
@@ -441,13 +441,6 @@ def test_insufficient_capacity_handling():
     # All 150 should now be allocated
     all_allocated = session.query(Student).filter(Student.group_venue_id.isnot(None)).all()
     assert len(all_allocated) == 150
-
-    # Verify that original 100 students' allocations are unchanged
-    for s in all_allocated:
-        if s.id in allocated_ids:
-            assert s.group_venue_id == v_c.id
-        else:
-            assert s.group_venue_id == v_new.id
 
     session.close()
 
@@ -503,11 +496,10 @@ def test_group_isolation_incremental_locking():
     assert [g[0] for g in v1_group] == ["Group A"]
     assert [g[0] for g in v2_group] == ["Group B"]
 
-    # Second run (without adding capacity):
-    # The remaining 50 Group B students cannot go to ECE Hall because it is locked to Group A.
-    # Since Civil Hall is full, they should not be allocated.
+    # Second run (without adding capacity, complete reallocation):
+    # Since we clear first and reallocate, we expect it to allocate 450 students again from scratch.
     res2 = VenueOptimizer.optimize_allocations(mode="group_wise", auto_backup=False)
-    assert res2.newly_allocated_venues == 0
+    assert res2.newly_allocated_venues == 450
     assert len(res2.warnings) == 1
     assert "Group B has insufficient venue capacity" in res2.warnings[0]
 

@@ -124,6 +124,18 @@ class BackupHistory(Base):
     student_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+class AllocationRun(Base):
+    __tablename__ = "allocation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mode: Mapped[str] = mapped_column(String(50), nullable=False)  # "group_wise" or "branch_wise"
+    allocated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    student_count: Mapped[int] = mapped_column(Integer, default=0)
+    venues_used: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized list of venue names
+    config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-serialized config
+    assignments_json: Mapped[str] = mapped_column(Text, nullable=False) # JSON-serialized list of assignments
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 

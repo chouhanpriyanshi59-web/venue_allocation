@@ -149,6 +149,18 @@ class BranchVenueAllocationView(QWidget):
             session.close()
 
     def run_branch_allocation(self):
+        # Mandatory Warning Dialog for destructive reallocation
+        reply = QMessageBox.warning(
+            self,
+            "Confirm Global Venue Reallocation",
+            "WARNING: Performing a Venue Allocation will completely clear ALL existing active venue assignments and recalculate a fresh, randomized allocation for all students.\n\n"
+            "This operation cannot be undone. Are you sure you want to proceed?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
         try:
             res = VenueOptimizer.optimize_allocations(mode="branch_wise")
             if res.warnings and any("insufficient venue capacity" in w for w in res.warnings):

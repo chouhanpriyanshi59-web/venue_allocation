@@ -24,6 +24,7 @@ from ui.views.group_view import GroupAllocationView
 from ui.views.venue_view import VenueAllocationView
 from ui.views.branch_venue_view import BranchVenueAllocationView
 from ui.views.backup_view import BackupRollbackView
+from ui.views.history_view import AllocationHistoryView
 from ui.views.export_view import ExportView
 from ui.views.logs_view import LogsSettingsView
 
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
             ("group", "🔀 Group Allocation", GroupAllocationView),
             ("venue_group", "🏛️ Group Venue Alloc", VenueAllocationView),
             ("venue_branch", "🏢 Branch Venue Alloc", BranchVenueAllocationView),
+            ("history", "⏳ Allocation History", AllocationHistoryView),
             ("backup", "🛡️ Backup & Rollback", BackupRollbackView),
             ("export", "📤 Export Center", ExportView),
             ("logs", "📜 Audit Logs", LogsSettingsView),
