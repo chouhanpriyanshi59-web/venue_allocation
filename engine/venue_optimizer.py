@@ -43,17 +43,15 @@ class VenueOptimizer:
         active_venues = session.query(Venue).filter(Venue.is_active == True).all()
         time_slots = session.query(TimeSlot).all()
 
-        total_capacity_per_slot = sum(v.capacity for v in active_venues)
-        total_capacity = total_capacity_per_slot * len(time_slots)
+        total_capacity = sum(v.capacity for v in active_venues)
 
         is_sufficient = total_capacity >= total_students
         deficiency = max(0, total_students - total_capacity)
 
         suggested_per_slot = {}
         if deficiency > 0 and len(time_slots) > 0:
-            extra_per_slot = (deficiency + len(time_slots) - 1) // len(time_slots)
             for ts in time_slots:
-                suggested_per_slot[ts.slot_name] = extra_per_slot
+                suggested_per_slot[ts.slot_name] = deficiency
 
         return CapacityReport(
             total_students=total_students,
@@ -531,8 +529,7 @@ class VenueOptimizer:
 
                         db_alloc_count = session.query(Student).filter(
                             Student.is_deleted == False,
-                            Student.branch_venue_id == v.id,
-                            Student.branch_time_slot_id == t_slot.id
+                            Student.branch_venue_id == v.id
                         ).count()
                         rem_cap = max(0, v.capacity - db_alloc_count)
                         if rem_cap > 0:
@@ -696,8 +693,7 @@ class VenueOptimizer:
 
                         db_alloc_count = session.query(Student).filter(
                             Student.is_deleted == False,
-                            Student.group_venue_id == v.id,
-                            Student.group_time_slot_id == t_slot.id
+                            Student.group_venue_id == v.id
                         ).count()
                         rem_cap = max(0, v.capacity - db_alloc_count)
                         if rem_cap > 0:

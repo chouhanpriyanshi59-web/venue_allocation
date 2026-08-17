@@ -38,15 +38,26 @@ def test_venue_capacity_check_and_optimization():
 
     res_fail = VenueOptimizer.optimize_allocations(auto_backup=False)
     assert any("insufficient venue capacity" in w for w in res_fail.warnings)
+    assert session.query(Student).filter(Student.group_venue_id.isnot(None)).count() == 20
 
-    # Increase capacity to 30 by adding another Time Slot
+    # Add another time slot. Under correct logic, capacity MUST remain 20.
     ts2 = TimeSlot(slot_name="Slot 2", start_time="11:30 AM", end_time="01:30 PM", day_number=1)
     session.add(ts2)
     session.commit()
 
-    # Now total capacity = 2 venues * 2 slots * 10 cap = 40 >= 25 -> Should succeed!
-    res = VenueOptimizer.optimize_allocations(auto_backup=False)
-    assert res.newly_allocated_venues == 5
+    # Total capacity remains 20 < 25 -> Allocation still has warnings and allocates 0 newly
+    res2 = VenueOptimizer.optimize_allocations(auto_backup=False)
+    assert any("insufficient venue capacity" in w for w in res2.warnings)
+    assert res2.newly_allocated_venues == 0
+    assert session.query(Student).filter(Student.group_venue_id.isnot(None)).count() == 20
+
+    # Now, increase physical venue capacity from 10 to 20 for v1 -> total capacity becomes 30 >= 25 -> Should succeed!
+    v1_db = session.query(Venue).filter(Venue.id == v1.id).first()
+    v1_db.capacity = 20
+    session.commit()
+
+    res3 = VenueOptimizer.optimize_allocations(auto_backup=False)
+    assert res3.newly_allocated_venues == 5
     assert session.query(Student).filter(Student.group_venue_id.isnot(None)).count() == 25
     session.close()
 

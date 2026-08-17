@@ -33,8 +33,8 @@ def test_10k_student_benchmark():
     session.add_all(depts)
     session.commit()
 
-    # Create 10 Venues & 5 Time Slots -> Capacity 10 * 250 * 5 = 12,500 seats
-    venues = [Venue(name=f"Main Hall {i+1}", capacity=250, is_active=True) for i in range(10)]
+    # Create 10 Venues & 5 Time Slots -> Capacity 10 * 1000 = 10,000 seats
+    venues = [Venue(name=f"Main Hall {i+1}", capacity=1000, is_active=True) for i in range(10)]
     session.add_all(venues)
     
     time_slots = [TimeSlot(slot_name=f"Slot {i+1}", start_time=f"0{i+8}:00 AM", end_time=f"10:00 AM", day_number=1) for i in range(5)]
