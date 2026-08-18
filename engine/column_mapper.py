@@ -5,30 +5,25 @@ from config import FUZZY_MATCH_THRESHOLD
 
 # Internal Standard Schema Field Definitions
 INTERNAL_FIELDS = {
-    "student_id": {
-        "label": "Student ID",
+    "sin": {
+        "label": "SIN",
         "required": True,
-        "aliases": ["student id", "st_id", "id", "admission id", "enrollment id", "college id", "admission no", "admission number", "reg no", "registration number", "usn", "univ usn", "student usn", "usn number", "roll no", "roll number"]
+        "aliases": ["sin", "student identification number", "student identification no", "student id", "student_id", "usn"]
     },
     "full_name": {
-        "label": "Student Full Name",
+        "label": "STUDENT FULL NAME",
         "required": True,
-        "aliases": ["student full name", "full name", "student name", "candidate name", "name", "name of student", "first name", "student number", "student_name", "student_number"]
-    },
-    "department": {
-        "label": "Branch / Department",
-        "required": True,
-        "aliases": ["branch / department", "department", "dept", "branch", "stream", "course branch", "dept name"]
-    },
-    "gender": {
-        "label": "Gender",
-        "required": False,
-        "aliases": ["gender", "sex", "m/f", "m f", "gender (m/f)"]
+        "aliases": ["student full name", "student name", "full name", "candidate name", "name"]
     },
     "program": {
-        "label": "Program",
-        "required": False,
+        "label": "PROGRAM",
+        "required": True,
         "aliases": ["program", "degree", "course", "program name"]
+    },
+    "gender": {
+        "label": "GENDER",
+        "required": False,
+        "aliases": ["gender", "sex", "m/f", "m f", "gender (m/f)"]
     }
 }
 

@@ -3,27 +3,27 @@ from engine.column_mapper import ColumnMapper
 
 def test_column_mapper_exact_and_fuzzy():
     headers = [
-        "Candidate Name",
-        "Univ USN",
-        "Branch / Department",
-        "M/F",
+        "STUDENT FULL NAME",
+        "SIN",
+        "PROGRAM",
+        "GENDER",
         "Extra Random Column"
     ]
     mapping, unmapped, missing_required = ColumnMapper.map_columns(headers)
 
-    assert mapping["Candidate Name"] == "full_name"
-    assert mapping["Univ USN"] == "student_id"
-    assert mapping["Branch / Department"] == "department"
-    assert mapping["M/F"] == "gender"
+    assert mapping["STUDENT FULL NAME"] == "full_name"
+    assert mapping["SIN"] == "sin"
+    assert mapping["PROGRAM"] == "program"
+    assert mapping["GENDER"] == "gender"
     assert "Extra Random Column" in unmapped
     assert len(missing_required) == 0
 
 def test_column_mapper_missing_required():
-    headers = ["Candidate Name", "Random Header"]
+    headers = ["STUDENT FULL NAME", "Random Header"]
     mapping, unmapped, missing_required = ColumnMapper.map_columns(headers)
 
-    assert "Student ID" in missing_required
-    assert "Branch / Department" in missing_required
+    assert "SIN" in missing_required
+    assert "PROGRAM" in missing_required
 
 def test_idempotent_department_get_or_create():
     from database.connection import init_db, SessionLocal

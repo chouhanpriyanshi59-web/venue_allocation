@@ -1,5 +1,6 @@
 import pandas as pd
 import hashlib
+import re
 from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,44 @@ from engine.column_mapper import ColumnMapper
 from core.domain_models import Gender, StudentStatus
 from core.exceptions import ValidationError, InductionSystemError
 from config import NEAR_DUPLICATE_THRESHOLD
+
+def normalize_program_text(text: str) -> str:
+    """Normalizes the program text for uniform matching."""
+    text = text.upper().strip()
+    text = text.replace(".", "")
+    text = text.replace("–", "-").replace("—", "-")
+    text = text.replace("&", "AND")
+    text = " ".join(text.split())
+    return text
+
+def identify_department(program_text: str) -> Tuple[str, str]:
+    """
+    Identifies the department code and name from the program text.
+    Returns (code, name) if found, else raises ValueError.
+    """
+    norm = normalize_program_text(program_text)
+    
+    # Priority order rules to prevent overlapping patterns
+    rules = [
+        ("AIML", "Artificial Intelligence & Machine Learning", r"ARTIFICIAL INTELLIGENCE|\bAIANDML\b|AI\&ML|\bAIML\b|\bAI\b"),
+        ("CY", "Cyber Security", r"CYBER SECURITY|\bCYBER\b|\bCY\b"),
+        ("DS", "Data Science", r"DATA SCIENCE|\bDS\b"),
+        ("ETE", "Electronics & Telecommunication Engineering", r"TELECOMMUNICATION|TELECOMM|\bETE\b|\bET\b"),
+        ("ECE", "Electronics & Communication Engineering", r"ELECTRONICS AND COMMUNICATION|ELECTRONICS AND COMM|ELECTRONICS \& COMM|\bECE\b|\bEC\b"),
+        ("EEE", "Electrical & Electronics Engineering", r"ELECTRICAL AND ELECTRONICS|ELECTRICAL \& ELECTRONICS|\bEEE\b|\bEE\b"),
+        ("CHEM", "Chemical Engineering", r"CHEMICAL|\bCHEM\b|\bCE\b"),
+        ("CIVIL", "Civil Engineering", r"CIVIL|\bCV\b"),
+        ("BT", "Biotechnology", r"BIOTECHNOLOGY|BIOTECH|\bBT\b"),
+        ("IEM", "Industrial Engineering & Management", r"INDUSTRIAL ENGINEERING|\bIEM\b|\bIM\b"),
+        ("MECH", "Mechanical Engineering", r"MECHANICAL|\bMECH\b|\bME\b"),
+        ("CSE", "Computer Science Engineering", r"COMPUTER SCIENCE|COMPUTER SCIENCE ENGINEERING|\bCSE\b|\bCS\b"),
+    ]
+    
+    for code, name, pattern in rules:
+        if re.search(pattern, norm):
+            return code, name
+            
+    raise ValueError(f"Unable to identify department for program: {program_text}")
 
 class DataImporter:
     """Handles file parsing, fuzzy header mapping, validation, duplicate detection, and smart differential imports."""
@@ -57,7 +96,7 @@ class DataImporter:
             df_renamed = df.rename(columns=column_mapping)
             
             # Verify required columns exist
-            for req in ['student_id', 'full_name', 'department']:
+            for req in ['sin', 'full_name', 'program']:
                 if req not in df_renamed.columns:
                     raise ValidationError(f"Required field '{req}' is missing in column mapping.")
 
@@ -66,11 +105,10 @@ class DataImporter:
             duplicate_usn_count = 0
             warnings = []
 
-            # Pre-load existing students map
+            # Pre-load existing students map (case-sensitive exact SIN matching)
             existing_students_map = {
-                s.usn.strip().upper(): s for s in session.query(Student).filter(Student.is_deleted == False).all()
+                s.usn.strip(): s for s in session.query(Student).filter(Student.is_deleted == False).all()
             }
-            existing_names_list = [(s.full_name, s.usn) for s in existing_students_map.values()]
 
             # Create ImportHistory record first
             imp_record = ImportHistory(
@@ -87,83 +125,66 @@ class DataImporter:
 
             for idx, row in df_renamed.iterrows():
                 row_num = idx + 2  # Excel 1-based header offset
-                raw_stu_id = str(row['student_id']).strip() if pd.notna(row['student_id']) else ""
-                raw_usn = raw_stu_id
+                raw_sin = str(row['sin']).strip() if pd.notna(row['sin']) else ""
                 raw_name = str(row['full_name']).strip() if pd.notna(row['full_name']) else ""
-                raw_dept = str(row['department']).strip() if pd.notna(row['department']) else ""
-                raw_prog = str(row.get('program', 'B.Tech')).strip() if pd.notna(row.get('program')) else "B.Tech"
-                raw_gender = str(row.get('gender', 'Unknown')) if pd.notna(row.get('gender')) else "Unknown"
-                raw_stu_num = str(row.get('student_number', '')).strip() if pd.notna(row.get('student_number')) else None
+                raw_prog = str(row['program']).strip() if pd.notna(row['program']) else ""
 
-                if not raw_stu_id or raw_stu_id.lower() in ['nan', 'none', 'null']:
-                    warnings.append(f"Row {row_num}: Skipped record due to blank Student ID.")
-                    continue
+                if not raw_sin or raw_sin.lower() in ['nan', 'none', 'null']:
+                    raise ValidationError(f"Row {row_num}: SIN is required and cannot be empty.")
                 if not raw_name or raw_name.lower() in ['nan', 'none', 'null']:
-                    warnings.append(f"Row {row_num} (Student ID: {raw_stu_id}): Skipped record due to blank name.")
-                    continue
-                if not raw_dept or raw_dept.lower() in ['nan', 'none', 'null']:
-                    warnings.append(f"Row {row_num} (Student ID: {raw_stu_id}): Skipped record due to blank department.")
-                    continue
+                    raise ValidationError(f"Row {row_num}: Student Full Name is required and cannot be empty.")
+                if not raw_prog or raw_prog.lower() in ['nan', 'none', 'null']:
+                    raise ValidationError(f"Row {row_num}: Program is required and cannot be empty.")
 
-                clean_usn_key = raw_usn.upper()
-                gender_enum = Gender.parse(raw_gender)
+                clean_sin = raw_sin.strip()
 
-                # Extract branch code from USN (e.g. "CE" or "CV" from "1RV26CE001")
-                usn_branch_code = None
-                if len(clean_usn_key) >= 7:
-                    potential_branch = clean_usn_key[5:7]
-                    if potential_branch.isalpha():
-                        usn_branch_code = potential_branch
-
-                CANONICAL_DEPARTMENTS = {
-                    "CS": "Computer Science Engineering",
-                    "AI": "Artificial Intelligence & Machine Learning",
-                    "DS": "Data Science",
-                    "CY": "Cyber Security",
-                    "EC": "Electronics & Communication Engineering",
-                    "ET": "Electronics & Telecommunication Engineering",
-                    "EE": "Electrical & Electronics Engineering",
-                    "CE": "Chemical Engineering",
-                    "ME": "Mechanical Engineering",
-                    "IM": "Industrial Engineering & Management",
-                    "CV": "Civil Engineering",
-                    "BT": "Biotechnology"
-                }
-
-                if usn_branch_code in CANONICAL_DEPARTMENTS:
-                    resolved_dept_name = CANONICAL_DEPARTMENTS[usn_branch_code]
-                    resolved_dept_code = usn_branch_code
+                # GENDER is optional
+                if 'gender' in row and pd.notna(row['gender']):
+                    raw_gender = str(row['gender']).strip()
+                    gender_enum = Gender.parse(raw_gender)
                 else:
-                    resolved_dept_name = raw_dept
-                    resolved_dept_code = None
+                    gender_enum = Gender.UNKNOWN
 
-                dept_obj = Repository.get_or_create_department(session, resolved_dept_name, resolved_dept_code)
+                # Extract department information from PROGRAM
+                try:
+                    dept_code, dept_name = identify_department(raw_prog)
+                except ValueError:
+                    raise ValidationError(
+                        f"Unable to identify department for program:\n"
+                        f"{raw_prog} at row {row_num} (Student Name: '{raw_name}', SIN: '{raw_sin}')."
+                    )
+
+                dept_obj = Repository.get_or_create_department(session, dept_name, dept_code)
                 prog_obj = Repository.get_or_create_program(session, raw_prog)
 
-                # Check if Student ID (mapped to USN) exists in DB
-                if clean_usn_key in existing_students_map:
-                    stu = existing_students_map[clean_usn_key]
+                # Check if exact case-sensitive SIN exists in DB
+                if clean_sin in existing_students_map:
+                    stu = existing_students_map[clean_sin]
                     if stu.import_history_id is None:
                         stu.import_history_id = imp_record.id
                     
-                    # Update fields if faculty corrected typo, preserving allocation!
                     changed = False
                     if stu.full_name != raw_name:
-                        warnings.append(f"Student ID {raw_stu_id}: Updated name from '{stu.full_name}' to '{raw_name}'.")
+                        warnings.append(f"SIN {raw_sin}: Updated name from '{stu.full_name}' to '{raw_name}'.")
                         stu.full_name = raw_name
                         changed = True
                     if stu.department_id != dept_obj.id:
-                        warnings.append(f"Student ID {raw_stu_id}: Updated department to '{dept_obj.name}'. Existing allocations preserved.")
+                        warnings.append(f"SIN {raw_sin}: Updated department to '{dept_obj.name}'. Existing allocations preserved.")
                         stu.department_id = dept_obj.id
                         changed = True
-                    if stu.gender != gender_enum.value:
-                        stu.gender = gender_enum.value
+                    if stu.program_id != prog_obj.id:
+                        stu.program_id = prog_obj.id
                         changed = True
+                    # Only update/validate gender if the GENDER column was actually provided
+                    if 'gender' in row and pd.notna(row['gender']):
+                        if stu.gender != gender_enum.value:
+                            stu.gender = gender_enum.value
+                            changed = True
 
                     # Reactivate if inactive
                     if stu.status == StudentStatus.INACTIVE.value:
                         stu.status = StudentStatus.ACTIVE.value
-                        warnings.append(f"Student ID {raw_stu_id}: Reactivated student status to Active.")
+                        warnings.append(f"SIN {raw_sin}: Reactivated student status to Active.")
                         changed = True
 
                     if changed:
@@ -171,17 +192,10 @@ class DataImporter:
                     else:
                         duplicate_usn_count += 1
                 else:
-                    # Near duplicate name check
-                    for existing_name, ex_usn in existing_names_list:
-                        similarity = fuzz.token_sort_ratio(raw_name.lower(), existing_name.lower())
-                        if similarity >= NEAR_DUPLICATE_THRESHOLD:
-                            warnings.append(f"Row {row_num}: Near-duplicate name warning! '{raw_name}' (Student ID: {raw_stu_id}) is {similarity}% similar to existing student '{existing_name}' (Student ID: {ex_usn}).")
-                            break
-
                     new_stu = Student(
-                        usn=raw_usn,
-                        student_id=raw_stu_id,
-                        student_number=raw_stu_num,
+                        usn=clean_sin,
+                        student_id=clean_sin,
+                        student_number=None,
                         full_name=raw_name,
                         gender=gender_enum.value,
                         status=StudentStatus.ACTIVE.value,
@@ -191,8 +205,7 @@ class DataImporter:
                         created_at=datetime.utcnow()
                     )
                     session.add(new_stu)
-                    existing_students_map[clean_usn_key] = new_stu
-                    existing_names_list.append((raw_name, raw_usn))
+                    existing_students_map[clean_sin] = new_stu
                     new_count += 1
 
             # Update final counts on ImportHistory
@@ -217,6 +230,8 @@ class DataImporter:
                 "new_students": new_count,
                 "updated_students": updated_count,
                 "duplicate_skipped": duplicate_usn_count,
+                "invalid_rows": 0,
+                "unknown_departments": 0,
                 "warnings": warnings,
                 "is_reimport": existing_import is not None
             }

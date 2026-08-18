@@ -18,25 +18,25 @@ class Repository:
         
         # Standardize mappings
         NAME_TO_CODE = {
-            "civil engineering": "CV",
-            "chemical engineering": "CE",
-            "computer science engineering": "CS",
-            "computer science & engineering": "CS",
-            "computer science": "CS",
+            "civil engineering": "CIVIL",
+            "chemical engineering": "CHEM",
+            "computer science engineering": "CSE",
+            "computer science & engineering": "CSE",
+            "computer science": "CSE",
             "cyber security": "CY",
             "biotechnology": "BT",
-            "electrical & electronics engineering": "EE",
-            "electrical and electronics engineering": "EE",
-            "electronics & communication engineering": "EC",
-            "electronics and communication engineering": "EC",
-            "electronics & telecommunication engineering": "ET",
-            "electronics and telecommunication engineering": "ET",
-            "industrial engineering & management": "IM",
-            "industrial engineering and management": "IM",
-            "mechanical engineering": "ME",
+            "electrical & electronics engineering": "EEE",
+            "electrical and electronics engineering": "EEE",
+            "electronics & communication engineering": "ECE",
+            "electronics and communication engineering": "ECE",
+            "electronics & telecommunication engineering": "ETE",
+            "electronics and telecommunication engineering": "ETE",
+            "industrial engineering & management": "IEM",
+            "industrial engineering and management": "IEM",
+            "mechanical engineering": "MECH",
             "data science": "DS",
-            "artificial intelligence & machine learning": "AI",
-            "artificial intelligence and machine learning": "AI"
+            "artificial intelligence & machine learning": "AIML",
+            "artificial intelligence and machine learning": "AIML"
         }
         
         CODE_TO_NAME = {
@@ -53,10 +53,13 @@ class Repository:
             "EE": "Electrical & Electronics Engineering",
             "EEE": "Electrical & Electronics Engineering",
             "CE": "Chemical Engineering",
+            "CHEM": "Chemical Engineering",
             "ME": "Mechanical Engineering",
+            "MECH": "Mechanical Engineering",
             "IM": "Industrial Engineering & Management",
             "IEM": "Industrial Engineering & Management",
             "CV": "Civil Engineering",
+            "CIVIL": "Civil Engineering",
             "BT": "Biotechnology"
         }
 

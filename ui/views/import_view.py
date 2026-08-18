@@ -176,11 +176,11 @@ class ImportView(QWidget):
             warn_msg = "\n".join(res["warnings"]) if res["warnings"] else "No warnings or validation errors."
             summary = (
                 f"IMPORT COMPLETED SUCCESSFULLY!\n"
-                f"• File Name: {res['file_name']}\n"
-                f"• Total Processed Rows: {res['total_rows']}\n"
-                f"• New Students Added: {res['new_students']}\n"
-                f"• Existing Records Updated: {res['updated_students']}\n"
-                f"• Duplicates / Unchanged Skipped: {res['duplicate_skipped']}\n\n"
+                f"Total Rows: {res['total_rows']}\n"
+                f"New Students: {res['new_students']}\n"
+                f"Existing Students Updated: {res['updated_students']}\n"
+                f"Invalid Rows: {res.get('invalid_rows', 0)}\n"
+                f"Unknown Departments: {res.get('unknown_departments', 0)}\n\n"
                 f"Diagnostic Audit Logs:\n{warn_msg}"
             )
             self.txt_warnings.setText(summary)
