@@ -2,20 +2,22 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QMessageBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QInputDialog, QLineEdit, QDialog, QFormLayout,
-    QTimeEdit, QDialogButtonBox
+    QTimeEdit, QDialogButtonBox, QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QTime
 from database.connection import SessionLocal
 from database.models import Venue, TimeSlot
 from database.repository import Repository
 from engine.venue_optimizer import VenueOptimizer
+from services.export_service import parse_time_to_minutes, format_time_str
+import re
 
 class TimeSlotInputDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, slot_name: str = "", start_time: str = "", end_time: str = ""):
         super().__init__(parent)
-        self.setWindowTitle("Add Time Slot")
+        self.setWindowTitle("Time Slot Details")
         self.setModal(True)
-        self.resize(320, 180)
+        self.resize(320, 220)
         
         self.setStyleSheet("""
             QDialog {
@@ -41,6 +43,13 @@ class TimeSlotInputDialog(QDialog):
                 border-radius: 4px;
                 padding: 6px;
             }
+            QComboBox {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 6px;
+            }
             QPushButton {
                 background-color: #38BDF8;
                 color: #0F172A;
@@ -59,47 +68,136 @@ class TimeSlotInputDialog(QDialog):
         
         self.txt_name = QLineEdit()
         self.txt_name.setPlaceholderText("e.g. Morning Session")
+        self.txt_name.setText(slot_name)
         
         # Start Time
         self.time_start = QTimeEdit()
-        self.time_start.setDisplayFormat("h:mm AP")
+        self.time_start.setDisplayFormat("h:mm")
+        self.time_start.setMinimumTime(QTime(1, 0))
+        self.time_start.setMaximumTime(QTime(12, 59))
         self.time_start.setTime(QTime(9, 0))
+        
+        self.combo_start_period = QComboBox()
+        self.combo_start_period.addItems(["AM", "PM"])
         
         # End Time
         self.time_end = QTimeEdit()
-        self.time_end.setDisplayFormat("h:mm AP")
+        self.time_end.setDisplayFormat("h:mm")
+        self.time_end.setMinimumTime(QTime(1, 0))
+        self.time_end.setMaximumTime(QTime(12, 59))
         self.time_end.setTime(QTime(10, 0))
         
+        self.combo_end_period = QComboBox()
+        self.combo_end_period.addItems(["AM", "PM"])
+        
+        # Populate values if editing
+        if start_time:
+            t_str = re.sub(r'\s+', ' ', start_time.strip().upper())
+            match = re.match(r'(\d+):(\d+)\s*(AM|PM)', t_str)
+            if match:
+                h = int(match.group(1))
+                m = int(match.group(2))
+                period = match.group(3)
+                if h > 12:
+                    h -= 12
+                elif h == 0:
+                    h = 12
+                self.time_start.setTime(QTime(h, m))
+                idx = self.combo_start_period.findText(period)
+                if idx >= 0:
+                    self.combo_start_period.setCurrentIndex(idx)
+            else:
+                match_no_min = re.match(r'(\d+)\s*(AM|PM)', t_str)
+                if match_no_min:
+                    h = int(match_no_min.group(1))
+                    period = match_no_min.group(2)
+                    if h > 12:
+                        h -= 12
+                    elif h == 0:
+                        h = 12
+                    self.time_start.setTime(QTime(h, 0))
+                    idx = self.combo_start_period.findText(period)
+                    if idx >= 0:
+                        self.combo_start_period.setCurrentIndex(idx)
+
+        if end_time:
+            t_str = re.sub(r'\s+', ' ', end_time.strip().upper())
+            match = re.match(r'(\d+):(\d+)\s*(AM|PM)', t_str)
+            if match:
+                h = int(match.group(1))
+                m = int(match.group(2))
+                period = match.group(3)
+                if h > 12:
+                    h -= 12
+                elif h == 0:
+                    h = 12
+                self.time_end.setTime(QTime(h, m))
+                idx = self.combo_end_period.findText(period)
+                if idx >= 0:
+                    self.combo_end_period.setCurrentIndex(idx)
+            else:
+                match_no_min = re.match(r'(\d+)\s*(AM|PM)', t_str)
+                if match_no_min:
+                    h = int(match_no_min.group(1))
+                    period = match_no_min.group(2)
+                    if h > 12:
+                        h -= 12
+                    elif h == 0:
+                        h = 12
+                    self.time_end.setTime(QTime(h, 0))
+                    idx = self.combo_end_period.findText(period)
+                    if idx >= 0:
+                        self.combo_end_period.setCurrentIndex(idx)
+
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(self.time_start)
+        start_layout.addWidget(self.combo_start_period)
+        
+        end_layout = QHBoxLayout()
+        end_layout.addWidget(self.time_end)
+        end_layout.addWidget(self.combo_end_period)
+        
         form_layout.addRow("Slot Name:", self.txt_name)
-        form_layout.addRow("Start Time:", self.time_start)
-        form_layout.addRow("End Time:", self.time_end)
+        form_layout.addRow("Start Time:", start_layout)
+        form_layout.addRow("End Time:", end_layout)
         
         layout.addLayout(form_layout)
         
         # Buttons
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.button_box.accepted.connect(self.accept)
+        self.button_box.accepted.connect(self.handle_accept)
         self.button_box.rejected.connect(self.reject)
         layout.addWidget(self.button_box)
 
     def get_values(self):
         name = self.txt_name.text().strip()
+        start_hour = self.time_start.time().hour()
+        start_minute = self.time_start.time().minute()
+        start_period = self.combo_start_period.currentText()
         
-        def format_qtime(qt_time):
-            hour = qt_time.hour()
-            minute = qt_time.minute()
-            period = "AM"
-            if hour >= 12:
-                period = "PM"
-                if hour > 12:
-                    hour -= 12
-            elif hour == 0:
-                hour = 12
-            return f"{hour}:{minute:02d} {period}"
-            
-        start_str = format_qtime(self.time_start.time())
-        end_str = format_qtime(self.time_end.time())
+        end_hour = self.time_end.time().hour()
+        end_minute = self.time_end.time().minute()
+        end_period = self.combo_end_period.currentText()
+        
+        start_str = f"{start_hour}:{start_minute:02d} {start_period}"
+        end_str = f"{end_hour}:{end_minute:02d} {end_period}"
         return name, start_str, end_str
+
+    def handle_accept(self):
+        name, start_str, end_str = self.get_values()
+        if not name:
+            QMessageBox.warning(self, "Validation Error", "Slot Name cannot be empty.")
+            return
+            
+        start_min = parse_time_to_minutes(start_str)
+        end_min = parse_time_to_minutes(end_str)
+        
+        if end_min <= start_min:
+            QMessageBox.warning(self, "Validation Error", "Start Time must be earlier than End Time. Overnight/reverse slots are not supported.")
+            return
+            
+        self.accept()
+
 
 class VenueAllocationView(QWidget):
     venue_allocation_done = Signal()
@@ -185,6 +283,7 @@ class VenueAllocationView(QWidget):
         self.slot_table.setHorizontalHeaderLabels(["Slot Name", "Start Time", "End Time", "Action"])
         self.slot_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.slot_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.slot_table.cellDoubleClicked.connect(self.edit_timeslot)
         sb_layout.addWidget(self.slot_table)
 
         lists_layout.addWidget(slot_box)
@@ -219,9 +318,18 @@ class VenueAllocationView(QWidget):
             for v in venues:
                 row = self.venue_table.rowCount()
                 self.venue_table.insertRow(row)
-                self.venue_table.setItem(row, 0, QTableWidgetItem(v.name))
-                self.venue_table.setItem(row, 1, QTableWidgetItem(str(v.capacity)))
-                self.venue_table.setItem(row, 2, QTableWidgetItem("Active" if v.is_active else "Inactive"))
+                
+                item_name = QTableWidgetItem(v.name)
+                item_name.setFlags(item_name.flags() & ~Qt.ItemIsEditable)
+                self.venue_table.setItem(row, 0, item_name)
+                
+                item_cap = QTableWidgetItem(str(v.capacity))
+                item_cap.setFlags(item_cap.flags() & ~Qt.ItemIsEditable)
+                self.venue_table.setItem(row, 1, item_cap)
+                
+                item_status = QTableWidgetItem("Active" if v.is_active else "Inactive")
+                item_status.setFlags(item_status.flags() & ~Qt.ItemIsEditable)
+                self.venue_table.setItem(row, 2, item_status)
 
                 btn_del_v = QPushButton("Remove")
                 btn_del_v.setProperty("class", "danger-btn")
@@ -231,13 +339,24 @@ class VenueAllocationView(QWidget):
 
             # Refresh Time Slots
             slots = session.query(TimeSlot).filter(TimeSlot.group_name == self.group_name).all()
+            slots = sorted(slots, key=lambda s: (s.day_number, parse_time_to_minutes(s.start_time), s.slot_name or "", s.id))
             self.slot_table.setRowCount(0)
             for s in slots:
                 row = self.slot_table.rowCount()
                 self.slot_table.insertRow(row)
-                self.slot_table.setItem(row, 0, QTableWidgetItem(s.slot_name))
-                self.slot_table.setItem(row, 1, QTableWidgetItem(s.start_time))
-                self.slot_table.setItem(row, 2, QTableWidgetItem(s.end_time))
+                
+                item_name = QTableWidgetItem(s.slot_name)
+                item_name.setFlags(item_name.flags() & ~Qt.ItemIsEditable)
+                item_name.setData(Qt.UserRole, s.id)
+                self.slot_table.setItem(row, 0, item_name)
+                
+                item_start = QTableWidgetItem(format_time_str(s.start_time))
+                item_start.setFlags(item_start.flags() & ~Qt.ItemIsEditable)
+                self.slot_table.setItem(row, 1, item_start)
+                
+                item_end = QTableWidgetItem(format_time_str(s.end_time))
+                item_end.setFlags(item_end.flags() & ~Qt.ItemIsEditable)
+                self.slot_table.setItem(row, 2, item_end)
 
                 btn_del_s = QPushButton("Remove")
                 btn_del_s.setProperty("class", "danger-btn")
@@ -302,6 +421,15 @@ class VenueAllocationView(QWidget):
                 session.close()
 
     def add_timeslot(self):
+        session = SessionLocal()
+        try:
+            slot_count = session.query(TimeSlot).filter(TimeSlot.group_name == self.group_name).count()
+            if slot_count >= 4:
+                QMessageBox.warning(self, "Validation Error", f"Maximum of 4 time slots are allowed for {self.group_name}.")
+                return
+        finally:
+            session.close()
+
         dialog = TimeSlotInputDialog(self)
         if dialog.exec() == QDialog.Accepted:
             name, start, end = dialog.get_values()
@@ -314,6 +442,33 @@ class VenueAllocationView(QWidget):
                     self.venue_allocation_done.emit()
                 finally:
                     session.close()
+
+    def edit_timeslot(self, row, column):
+        item = self.slot_table.item(row, 0)
+        if not item:
+            return
+        slot_id = item.data(Qt.UserRole)
+        if slot_id is None:
+            return
+            
+        session = SessionLocal()
+        try:
+            ts = session.query(TimeSlot).filter(TimeSlot.id == slot_id).first()
+            if not ts:
+                return
+                
+            dialog = TimeSlotInputDialog(self, slot_name=ts.slot_name, start_time=ts.start_time, end_time=ts.end_time)
+            if dialog.exec() == QDialog.Accepted:
+                name, start, end = dialog.get_values()
+                if name:
+                    ts.slot_name = name
+                    ts.start_time = start
+                    ts.end_time = end
+                    session.commit()
+                    self.refresh_tables()
+                    self.venue_allocation_done.emit()
+        finally:
+            session.close()
 
     def delete_timeslot(self, slot_id: int, slot_name: str):
         reply = QMessageBox.question(

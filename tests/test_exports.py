@@ -1,7 +1,7 @@
 import pytest
 import re
 from database.connection import init_db, SessionLocal
-from database.models import TimeSlot
+from database.models import TimeSlot, Student
 from database.repository import Repository
 from services.export_service import ExportService
 
@@ -9,7 +9,12 @@ def test_slot_chronological_sorting_and_formatting():
     init_db()
     session = SessionLocal()
     try:
-        # Clear existing time slots
+        # Clear existing student references to time slots to avoid foreign key errors
+        session.query(Student).update({
+            Student.time_slot_id: None,
+            Student.group_time_slot_id: None,
+            Student.branch_time_slot_id: None
+        })
         session.query(TimeSlot).delete()
         session.commit()
 
@@ -25,17 +30,18 @@ def test_slot_chronological_sorting_and_formatting():
         session.commit()
 
         # Run get_slot_timings
-        s1, s2, s3 = ExportService._get_slot_timings(session)
+        s1, s2, s3, s4 = ExportService._get_slot_timings(session)
 
         # Expected chronological order:
         # 1. 9:00 AM - 10:00 AM
         # 2. 9:30 AM - 10:45 AM
         # 3. 1:00 PM - 3:00 PM
-        # 4. 2:00 PM - 4:15 PM (but only top 3 are returned by the helper)
+        # 4. 2:00 PM - 4:15 PM
 
         assert s1 == "9:00 AM - 10:00 AM"
         assert s2 == "9:30 AM - 10:45 AM"
         assert s3 == "1:00 PM - 3:00 PM"
+        assert s4 == "2:00 PM - 4:15 PM"
 
     finally:
         session.close()

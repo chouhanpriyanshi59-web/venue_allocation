@@ -540,6 +540,52 @@ def test_select_minimal_venues():
     assert res4[0].name == "A"
 
 
+def test_branch_isolation_bug_reproduction():
+    session = SessionLocal()
+
+    # 1. Setup departments matching the scenario
+    ece = Department(name="Electronics", code="ECE")
+    cse = Department(name="Computer Science", code="CSE")
+    mech = Department(name="Mechanical", code="MECH")
+    aiml = Department(name="Artificial Intelligence", code="AIML")
+    session.add_all([ece, cse, mech, aiml])
+    session.flush()
+
+    # 2. Add students matching strengths
+    # ECE: 109, CSE: 210, MECH: 53, AIML: 72
+    dept_counts = {ece.id: 109, cse.id: 210, mech.id: 53, aiml.id: 72}
+    for dept_id, count in dept_counts.items():
+        for i in range(count):
+            s = Student(
+                usn=f"1DS21{dept_id}_{i:03d}",
+                full_name=f"Student {dept_id} {i}",
+                gender="Male" if i % 2 == 0 else "Female",
+                department_id=dept_id,
+                status="Active"
+            )
+            session.add(s)
+
+    # 3. Add venues
+    v1 = Venue(name="ece sem hall", capacity=180, is_active=True)
+    v2 = Venue(name="civil hall", capacity=180, is_active=True)
+    v3 = Venue(name="iem hall", capacity=110, is_active=True)
+    v4 = Venue(name="ise hall", capacity=200, is_active=True)
+    v5 = Venue(name="chem", capacity=100, is_active=True)
+    v6 = Venue(name="ete", capacity=110, is_active=True)
+
+    # 4. Add 1 Time Slot
+    ts = TimeSlot(slot_name="Slot 1", start_time="09:00 AM", end_time="11:00 AM", day_number=1)
+    session.add_all([v1, v2, v3, v4, v5, v6, ts])
+    session.commit()
+
+    # 5. Run Branch-wise Allocation
+    res = VenueOptimizer.optimize_allocations(mode="branch_wise", auto_backup=False)
+    assert res.newly_allocated_venues == 444
+    assert len(res.warnings) == 0
+
+    session.close()
+
+
 
 
 

@@ -695,6 +695,7 @@ class VenueOptimizer:
                         # Deduct assigned capacities in this time slot
                         for v in selected_venues:
                             venue_rem_caps[v.id] -= venue_targets.get(v.id, 0)
+                            venue_dept_locks[v.id] = dept_id
 
                         # Allocate gender strata to selected venues according to venue_targets
                         gender_students: Dict[str, List[Student]] = {}
