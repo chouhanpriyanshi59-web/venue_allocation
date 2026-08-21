@@ -36,7 +36,9 @@ class Repository:
             "mechanical engineering": "MECH",
             "data science": "DS",
             "artificial intelligence & machine learning": "AIML",
-            "artificial intelligence and machine learning": "AIML"
+            "artificial intelligence and machine learning": "AIML",
+            "aerospace engineering": "AS",
+            "aerospace": "AS"
         }
         
         CODE_TO_NAME = {
@@ -60,7 +62,8 @@ class Repository:
             "IEM": "Industrial Engineering & Management",
             "CV": "Civil Engineering",
             "CIVIL": "Civil Engineering",
-            "BT": "Biotechnology"
+            "BT": "Biotechnology",
+            "AS": "Aerospace Engineering"
         }
 
         # Determine target name and code

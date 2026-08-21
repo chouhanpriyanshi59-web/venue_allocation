@@ -36,14 +36,15 @@ def identify_department(program_text: str) -> Tuple[str, str]:
         ("AIML", "Artificial Intelligence & Machine Learning", r"ARTIFICIAL INTELLIGENCE|\bAIANDML\b|AI\&ML|\bAIML\b|\bAI\b"),
         ("CY", "Cyber Security", r"CYBER SECURITY|\bCYBER\b|\bCY\b"),
         ("DS", "Data Science", r"DATA SCIENCE|\bDS\b"),
-        ("ETE", "Electronics & Telecommunication Engineering", r"TELECOMMUNICATION|TELECOMM|\bETE\b|\bET\b"),
+        ("ETE", "Electronics & Telecommunication Engineering", r"TELECOMMUNICATION|TELECOMM|TELE ENG|\bTELE\b|\bETE\b|\bET\b"),
         ("ECE", "Electronics & Communication Engineering", r"ELECTRONICS AND COMMUNICATION|ELECTRONICS AND COMM|ELECTRONICS \& COMM|\bECE\b|\bEC\b"),
         ("EEE", "Electrical & Electronics Engineering", r"ELECTRICAL AND ELECTRONICS|ELECTRICAL \& ELECTRONICS|\bEEE\b|\bEE\b"),
         ("CHEM", "Chemical Engineering", r"CHEMICAL|\bCHEM\b|\bCE\b"),
         ("CIVIL", "Civil Engineering", r"CIVIL|\bCV\b"),
         ("BT", "Biotechnology", r"BIOTECHNOLOGY|BIOTECH|\bBT\b"),
-        ("IEM", "Industrial Engineering & Management", r"INDUSTRIAL ENGINEERING|\bIEM\b|\bIM\b"),
+        ("IEM", "Industrial Engineering & Management", r"INDUSTRIAL ENGINEERING|INDUSTRIAL ENGG|INDUSTRIAL ENG|\bINDUSTRIAL\b|\bIEM\b|\bIM\b"),
         ("MECH", "Mechanical Engineering", r"MECHANICAL|\bMECH\b|\bME\b"),
+        ("AS", "Aerospace Engineering", r"AEROSPACE|\bAS\b"),
         ("CSE", "Computer Science Engineering", r"COMPUTER SCIENCE|COMPUTER SCIENCE ENGINEERING|\bCSE\b|\bCS\b"),
     ]
     

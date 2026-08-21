@@ -80,9 +80,16 @@ class ExportService:
     def _clean_group_name(cls, g_name: Optional[str]) -> str:
         if not g_name:
             return "Unassigned"
-        if g_name.startswith("Group "):
-            return g_name[6:]
-        return g_name
+        g_str = g_name.strip()
+        if g_str.upper() in ("A", "B"):
+            return f"Group {g_str.upper()}"
+        if not g_str.upper().startswith("GROUP"):
+            return f"Group {g_str}"
+        if g_str.upper() == "GROUP A":
+            return "Group A"
+        if g_str.upper() == "GROUP B":
+            return "Group B"
+        return g_str
 
     @classmethod
     def _get_slot_timings(cls, session: Session, group_name: Optional[str] = None) -> Tuple[str, str, str, str]:
@@ -140,8 +147,10 @@ class ExportService:
 
             for idx, s in enumerate(students, 1):
                 branch_val = ""
-                if s.department:
-                    branch_val = s.department.code or s.department.name
+                if s.program:
+                    branch_val = s.program.name
+                elif s.department:
+                    branch_val = s.department.name
                 
                 venue_val = "Unassigned"
                 if s.group_venue:
@@ -207,8 +216,10 @@ class ExportService:
 
             for idx, s in enumerate(students, 1):
                 branch_val = ""
-                if s.department:
-                    branch_val = s.department.code or s.department.name
+                if s.program:
+                    branch_val = s.program.name
+                elif s.department:
+                    branch_val = s.department.name
 
                 venue_val = "Unassigned"
                 if s.branch_venue:
@@ -274,8 +285,10 @@ class ExportService:
 
             for idx, s in enumerate(students, 1):
                 branch_val = ""
-                if s.department:
-                    branch_val = s.department.code or s.department.name
+                if s.program:
+                    branch_val = s.program.name
+                elif s.department:
+                    branch_val = s.department.name
 
                 venue_val = "Unassigned"
                 if s.group_venue:
@@ -340,8 +353,10 @@ class ExportService:
 
                 for idx, s in enumerate(students, 1):
                     branch_val = ""
-                    if s.department:
-                        branch_val = s.department.code or s.department.name
+                    if s.program:
+                        branch_val = s.program.name
+                    elif s.department:
+                        branch_val = s.department.name
 
                     venue_val = "Unassigned"
                     if s.group_venue:

@@ -16,6 +16,87 @@ def setup_db():
     session.commit()
     session.close()
 
+def test_user_requested_department_tests_1_to_5():
+    # Test 1: ETE
+    code1, name1 = identify_department("B.E 2025 SCHEME -   ELECTRONICS & TELE ENG")
+    assert code1 == "ETE"
+    assert name1 == "Electronics & Telecommunication Engineering"
+
+    # Test 2: IEM
+    code2, name2 = identify_department("B.E 2025 SCHEME -   INDUSTRIAL ENGG & MNGT")
+    assert code2 == "IEM"
+    assert name2 == "Industrial Engineering & Management"
+
+    # Test 3: AS
+    code3, name3 = identify_department("B.E 2025 SCHEME -   AEROSPACE")
+    assert code3 == "AS"
+    assert name3 == "Aerospace Engineering"
+
+    # Test 4: ECE (Must NOT be identified as ETE)
+    code4, name4 = identify_department("B.E 2025 SCHEME -   ELECTRONICS & COMM")
+    assert code4 == "ECE"
+    assert code4 != "ETE"
+    assert name4 == "Electronics & Communication Engineering"
+
+    # Test 5: IEM (Must NOT be identified as MECH or CSE)
+    code5, name5 = identify_department("B.E 2025 SCHEME -   INDUSTRIAL ENGG & MNGT")
+    assert code5 == "IEM"
+    assert code5 not in ["MECH", "CSE"]
+    assert name5 == "Industrial Engineering & Management"
+
+def test_mixed_import_all_13_supported_departments():
+    session = SessionLocal()
+    try:
+        sample_departments = [
+            ("1RV26CS001", "Student CSE", "B.E 2025 SCHEME - COMPUTER SCIENCE", "CSE", "Computer Science Engineering"),
+            ("1RV26AI001", "Student AIML", "B.E 2025 SCHEME - CSE(AI&ML)", "AIML", "Artificial Intelligence & Machine Learning"),
+            ("1RV26CY001", "Student CY", "B.E 2025 SCHEME - CYBER SECURITY", "CY", "Cyber Security"),
+            ("1RV26DS001", "Student DS", "B.E 2025 SCHEME - DATA SCIENCE", "DS", "Data Science"),
+            ("1RV26EC001", "Student ECE", "B.E 2025 SCHEME -   ELECTRONICS & COMM", "ECE", "Electronics & Communication Engineering"),
+            ("1RV26ET001", "Student ETE", "B.E 2025 SCHEME -   ELECTRONICS & TELE ENG", "ETE", "Electronics & Telecommunication Engineering"),
+            ("1RV26EE001", "Student EEE", "B.E 2025 SCHEME - ELECTRICAL & ELECTRONICS", "EEE", "Electrical & Electronics Engineering"),
+            ("1RV26ME001", "Student MECH", "B.E 2025 SCHEME - MECHANICAL ENGINEERING", "MECH", "Mechanical Engineering"),
+            ("1RV26CH001", "Student CHEM", "B.E 2025 SCHEME - CHEMICAL ENGINEERING", "CHEM", "Chemical Engineering"),
+            ("1RV26CV001", "Student CIVIL", "B.E 2025 SCHEME - CIVIL ENGINEERING", "CIVIL", "Civil Engineering"),
+            ("1RV26BT001", "Student BT", "B.E 2025 SCHEME - BIOTECHNOLOGY", "BT", "Biotechnology"),
+            ("1RV26IM001", "Student IEM", "B.E 2025 SCHEME -   INDUSTRIAL ENGG & MNGT", "IEM", "Industrial Engineering & Management"),
+            ("1RV26AS001", "Student AS", "B.E 2025 SCHEME -   AEROSPACE", "AS", "Aerospace Engineering"),
+        ]
+
+        rows = []
+        for sin, name, prog, _, _ in sample_departments:
+            rows.append({
+                "SIN": sin,
+                "STUDENT FULL NAME": name,
+                "PROGRAM": prog,
+                "GENDER": "Male"
+            })
+
+        df = pd.DataFrame(rows)
+        temp_csv = Path("data/temp_test_all_13_depts.csv")
+        df.to_csv(temp_csv, index=False)
+
+        mapping = {"SIN": "sin", "STUDENT FULL NAME": "full_name", "PROGRAM": "program", "GENDER": "gender"}
+        
+        try:
+            res = DataImporter.import_excel(temp_csv, mapping)
+            assert res["success"] is True
+            assert res["new_students"] == 13
+            assert res["unknown_departments"] == 0
+
+            # Verify in DB that each student got the exact department code and name
+            session.expire_all()
+            for sin, _, _, expected_code, expected_name in sample_departments:
+                stu = session.query(Student).filter(Student.usn == sin).first()
+                assert stu is not None, f"Student {sin} not found in DB"
+                assert stu.department.code == expected_code, f"Expected code {expected_code} for {sin}, got {stu.department.code}"
+                assert stu.department.name == expected_name, f"Expected name {expected_name} for {sin}, got {stu.department.name}"
+        finally:
+            if temp_csv.exists():
+                temp_csv.unlink()
+    finally:
+        session.close()
+
 def test_department_identification_scenarios():
     # Test 1: CSE
     code, name = identify_department("B.E 2025 SCHEME - COMPUTER SCIENCE")
